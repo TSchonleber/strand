@@ -1,6 +1,7 @@
 import { GROK_READ_TOOLS } from "@/clients/brain";
 import { llm } from "@/clients/llm";
-import type { LlmCall, LlmResult, LlmTool } from "@/clients/llm";
+import type { LlmTool } from "@/clients/llm";
+import { runAgenticLoop } from "@/agent/loop";
 import { env, persona } from "@/config";
 import { db } from "@/db";
 import { loadPrompt } from "@/prompts";
@@ -160,6 +161,8 @@ const CANDIDATE_BATCH_SCHEMA = {
 const PROMPT_CACHE_KEY = "strand:reasoner:v1";
 const MAX_TURNS = 5;
 const MAX_OUTPUT_TOKENS = 6000;
+/** Cap on agentic-loop iterations. Replaces the old single stuck-mid-thought retry. */
+const MAX_LOOP_ITERATIONS = 3;
 
 /**
  * A single Reasoner tick. Calls Grok with tools (x_search, web_search,
@@ -230,77 +233,55 @@ export async function reasonerTick(): Promise<CandidateEnvelope[]> {
     `# prompt_versions: persona=${personaPrompt.hash} reasoner=${reasonerPrompt.hash}`,
   ];
 
-  const baseCall: LlmCall = {
-    model: env.LLM_MODEL_REASONER,
-    messages: [
-      ...systemPrompts.map((content) => ({ role: "system" as const, content })),
-      { role: "user" as const, content: userInput },
-    ],
-    tools,
-    parallelToolCalls: true,
-    maxTurns: MAX_TURNS,
-    include: ["mcp_call_output", "reasoning.encrypted_content", "x_search_call.action.sources"],
-    promptCacheKey: PROMPT_CACHE_KEY,
-    structuredOutput: {
-      name: "CandidateBatch",
-      schema: CANDIDATE_BATCH_SCHEMA as unknown as Record<string, unknown>,
-      strict: true,
-    },
-    maxOutputTokens: MAX_OUTPUT_TOKENS,
-  };
-
-  let result: LlmResult<{ candidates: unknown[] }>;
+  // Drive through the provider-agnostic agentic loop runner.
+  // The loop owns chat→tool→chat iteration; server-side tools (x_search,
+  // web_search) + MCP are handled inside the provider per-call. Local
+  // function tools (none today) would plug in via `localTools`.
+  let loop: Awaited<ReturnType<typeof runAgenticLoop>>;
   try {
-    result = await provider.chat<{ candidates: unknown[] }>(baseCall);
+    loop = await runAgenticLoop({
+      provider,
+      model: env.LLM_MODEL_REASONER,
+      messages: [
+        ...systemPrompts.map((content) => ({ role: "system" as const, content })),
+        { role: "user" as const, content: userInput },
+      ],
+      tools,
+      parallelToolCalls: true,
+      maxTurns: MAX_TURNS,
+      maxIterations: MAX_LOOP_ITERATIONS,
+      include: ["mcp_call_output", "reasoning.encrypted_content", "x_search_call.action.sources"],
+      promptCacheKey: PROMPT_CACHE_KEY,
+      structuredOutput: {
+        name: "CandidateBatch",
+        schema: CANDIDATE_BATCH_SCHEMA as unknown as Record<string, unknown>,
+        strict: true,
+      },
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+    });
   } catch (err) {
     log.error({ err, durationMs: Date.now() - t0 }, "reasoner.call_failed");
     return [];
   }
 
-  let parsedCandidates = (result.parsed?.candidates ?? []) as unknown[];
-  let toolCallCount = result.toolCalls.length;
-  let responseId = result.responseId;
-  let previousResponseId: string | null = null;
-  let usage = result.usage;
-  let stuck = false;
-
-  // Stuck mid-thought: provider used tools but produced no candidates. Chain
-  // once via previous_response_id to let it finish. Only if the provider
-  // supports stored conversations (xAI, OpenAI Responses). Others skip.
-  if (
-    parsedCandidates.length === 0 &&
-    toolCallCount > 0 &&
-    provider.capabilities.previousResponseId
-  ) {
-    stuck = true;
-    log.info(
-      { response_id: responseId, tool_calls: toolCallCount },
-      "reasoner.stuck_mid_thought.retry",
+  // Loop surfaces provider errors via stopReason rather than throwing. Treat
+  // that as a hard failure: no row insert, empty return — matches the old
+  // "throw on call" behavior so the run counter stays honest.
+  if (loop.stopReason === "error") {
+    log.error(
+      { iterations: loop.iterations, durationMs: Date.now() - t0 },
+      "reasoner.loop_error",
     );
-    try {
-      const retry = await provider.chat<{ candidates: unknown[] }>({
-        ...baseCall,
-        messages: [
-          ...systemPrompts.map((content) => ({ role: "system" as const, content })),
-          { role: "user" as const, content: "Continue. Emit the final CandidateBatch JSON now." },
-        ],
-        previousResponseId: responseId,
-      });
-      parsedCandidates = (retry.parsed?.candidates ?? []) as unknown[];
-      previousResponseId = responseId;
-      responseId = retry.responseId;
-      toolCallCount += retry.toolCalls.length;
-      usage = {
-        inputTokens: usage.inputTokens + retry.usage.inputTokens,
-        cachedInputTokens: usage.cachedInputTokens + retry.usage.cachedInputTokens,
-        outputTokens: usage.outputTokens + retry.usage.outputTokens,
-        reasoningTokens: usage.reasoningTokens + retry.usage.reasoningTokens,
-        costInUsdTicks: usage.costInUsdTicks + retry.usage.costInUsdTicks,
-      };
-    } catch (err) {
-      log.error({ err, response_id: responseId }, "reasoner.retry_failed");
-    }
+    return [];
   }
+
+  const parsed = safeJsonCandidates(loop.finalText);
+  const parsedCandidates = parsed?.candidates ?? [];
+  const responseId = loop.finalResponseId;
+  const usage = loop.usage;
+  // `stuck_mid_thought` now means the loop took >1 iteration to finish
+  // (model used tools, then had to be nudged back to emit the final JSON).
+  const stuck = loop.iterations > 1;
 
   const candidates: CandidateEnvelope[] = [];
   for (const raw of parsedCandidates) {
@@ -324,9 +305,9 @@ export async function reasonerTick(): Promise<CandidateEnvelope[]> {
       )
       .run(
         responseId || null,
-        previousResponseId,
+        null, // previous_response_id no longer meaningful — loop owns history locally
         candidates.length,
-        toolCallCount,
+        loop.toolCallsTotal,
         JSON.stringify(usage),
         usage.costInUsdTicks,
         stuck ? 1 : 0,
@@ -338,17 +319,35 @@ export async function reasonerTick(): Promise<CandidateEnvelope[]> {
   log.info(
     {
       count: candidates.length,
-      tool_calls: toolCallCount,
+      tool_calls: loop.toolCallsTotal,
+      iterations: loop.iterations,
+      stop_reason: loop.stopReason,
       stuck_mid_thought: stuck,
       durationMs: Date.now() - t0,
       response_id: responseId,
-      previous_response_id: previousResponseId,
       usage,
     },
     "reasoner.tick",
   );
 
   return candidates;
+}
+
+function safeJsonCandidates(s: string): { candidates: unknown[] } | null {
+  if (!s) return null;
+  try {
+    const obj = JSON.parse(s) as unknown;
+    if (
+      obj &&
+      typeof obj === "object" &&
+      Array.isArray((obj as { candidates?: unknown[] }).candidates)
+    ) {
+      return obj as { candidates: unknown[] };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function safeParse(s: string): unknown {

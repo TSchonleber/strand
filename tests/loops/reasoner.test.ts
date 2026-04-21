@@ -180,7 +180,13 @@ describe("reasonerTick", () => {
     expect(row.candidate_count).toBe(2);
   });
 
-  it("stuck mid-thought: empty candidates + tool calls → chains via previous_response_id", async () => {
+  it("stuck mid-thought: empty candidates + tool calls → agentic loop iterates to finish", async () => {
+    // Semantics under runAgenticLoop:
+    //   First chat returns tool_calls with no final candidates → loop
+    //   records tool results (unknown_tool or executor output) in role:"tool"
+    //   messages and re-chats. Second chat returns the final candidates.
+    //   `previous_response_id` is no longer used — history lives in the
+    //   caller-supplied messages array.
     let callCount = 0;
     const bodies: Array<Record<string, unknown>> = [];
     server.use(
@@ -207,8 +213,14 @@ describe("reasonerTick", () => {
     expect(callCount).toBe(2);
     expect(out).toHaveLength(1);
 
-    // Second call must reference the first's response_id via previous_response_id
-    expect(bodies[1]?.["previous_response_id"]).toBe("resp_first");
+    // Second call's input must include the assistant's tool_call turn + the
+    // synthesized tool result — history-based continuation, not prev_resp_id.
+    const secondInput = bodies[1]?.["input"] as Array<Record<string, unknown>>;
+    expect(Array.isArray(secondInput)).toBe(true);
+    const hasFunctionCall = secondInput.some((item) => item["type"] === "function_call");
+    const hasFunctionResult = secondInput.some((item) => item["type"] === "function_call_output");
+    expect(hasFunctionCall).toBe(true);
+    expect(hasFunctionResult).toBe(true);
 
     const row = db()
       .prepare(
@@ -216,12 +228,12 @@ describe("reasonerTick", () => {
       )
       .get() as {
       stuck_mid_thought: number;
-      previous_response_id: string;
+      previous_response_id: string | null;
       response_id: string;
       candidate_count: number;
     };
     expect(row.stuck_mid_thought).toBe(1);
-    expect(row.previous_response_id).toBe("resp_first");
+    expect(row.previous_response_id).toBeNull();
     expect(row.response_id).toBe("resp_second");
     expect(row.candidate_count).toBe(1);
   });
