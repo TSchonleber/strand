@@ -12,6 +12,9 @@ export {
 export type {
   BashResult,
   ComputerExecutor,
+  DockerExecFn,
+  DockerExecResult,
+  DockerExecutorConfig,
   MouseButton,
   Screenshot,
   ScrollDirection,
