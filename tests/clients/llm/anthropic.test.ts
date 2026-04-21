@@ -12,7 +12,16 @@ const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
 let hitCount = 0;
 let lastBody: Record<string, unknown> | null = null;
+let lastHeaders: Record<string, string> | null = null;
 let nextResponse: Record<string, unknown> = {};
+
+function captureHeaders(req: Request): Record<string, string> {
+  const out: Record<string, string> = {};
+  req.headers.forEach((v, k) => {
+    out[k.toLowerCase()] = v;
+  });
+  return out;
+}
 
 function defaultResponse(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -34,6 +43,7 @@ function defaultResponse(overrides: Record<string, unknown> = {}): Record<string
 const server = setupServer(
   http.post(ANTHROPIC_URL, async ({ request }) => {
     hitCount += 1;
+    lastHeaders = captureHeaders(request);
     lastBody = (await request.json()) as Record<string, unknown>;
     return HttpResponse.json(nextResponse);
   }),
@@ -48,12 +58,14 @@ afterAll(() => {
 beforeEach(() => {
   hitCount = 0;
   lastBody = null;
+  lastHeaders = null;
   nextResponse = defaultResponse();
 });
 afterEach(() => {
   server.resetHandlers(
     http.post(ANTHROPIC_URL, async ({ request }) => {
       hitCount += 1;
+      lastHeaders = captureHeaders(request);
       lastBody = (await request.json()) as Record<string, unknown>;
       return HttpResponse.json(nextResponse);
     }),
@@ -367,5 +379,111 @@ describe("anthropic adapter — chat()", () => {
     expect(req["previous_response_id"]).toBeUndefined();
     expect(req["store"]).toBeUndefined();
     expect(req["max_turns"]).toBeUndefined();
+  });
+
+  it("13. computer_use (default enabledTools) emits all 3 native dated tools", () => {
+    const req = buildAnthropicRequest({
+      model: "claude-sonnet-4-5-20250514",
+      messages: [{ role: "user", content: "drive the desktop" }],
+      tools: [
+        {
+          type: "computer_use",
+          display: { width: 1280, height: 800 },
+        },
+      ],
+    });
+
+    const tools = req.tools as Array<Record<string, unknown>>;
+    expect(tools).toHaveLength(3);
+    expect(tools[0]).toEqual({
+      type: "computer_20250124",
+      name: "computer",
+      display_width_px: 1280,
+      display_height_px: 800,
+      display_number: 1,
+    });
+    expect(tools[1]).toEqual({ type: "bash_20250124", name: "bash" });
+    expect(tools[2]).toEqual({ type: "text_editor_20250124", name: "str_replace_editor" });
+  });
+
+  it("14. computer_use enabledTools: ['computer'] → only computer_20250124 emitted", () => {
+    const req = buildAnthropicRequest({
+      model: "claude-sonnet-4-5-20250514",
+      messages: [{ role: "user", content: "screenshot please" }],
+      tools: [
+        {
+          type: "computer_use",
+          display: { width: 1024, height: 768, displayNumber: 2 },
+          enabledTools: ["computer"],
+        },
+      ],
+    });
+
+    const tools = req.tools as Array<Record<string, unknown>>;
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toEqual({
+      type: "computer_20250124",
+      name: "computer",
+      display_width_px: 1024,
+      display_height_px: 768,
+      display_number: 2,
+    });
+  });
+
+  it("15. computer_use coexists with function + MCP tools, all three routed correctly", () => {
+    const req = buildAnthropicRequest({
+      model: "claude-sonnet-4-5-20250514",
+      messages: [{ role: "user", content: "combo" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "ping",
+            description: "ping",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+        {
+          type: "computer_use",
+          display: { width: 800, height: 600 },
+          enabledTools: ["computer", "bash"],
+        },
+        {
+          type: "mcp",
+          server_label: "brainctl",
+          server_url: "https://brain.example.com/mcp",
+          authorization: "Bearer secret",
+          allowed_tools: ["memory_search"],
+        },
+      ],
+    });
+
+    const tools = req.tools as Array<Record<string, unknown>>;
+    // function tool + computer + bash (enabledTools excludes text_editor)
+    expect(tools).toHaveLength(3);
+    expect(tools[0]?.["name"]).toBe("ping");
+    expect(tools[1]?.["type"]).toBe("computer_20250124");
+    expect(tools[2]?.["type"]).toBe("bash_20250124");
+
+    const mcp = req.mcp_servers as Array<Record<string, unknown>>;
+    expect(mcp).toHaveLength(1);
+    expect(mcp[0]?.["name"]).toBe("brainctl");
+  });
+
+  it("16. anthropic-beta: computer-use-2025-01-24 header set when computer_use requested; absent otherwise", async () => {
+    const p = makeProvider();
+    await p.chat({
+      model: "claude-sonnet-4-5-20250514",
+      messages: [{ role: "user", content: "screenshot" }],
+      tools: [{ type: "computer_use", display: { width: 1280, height: 800 } }],
+    });
+    expect(lastHeaders?.["anthropic-beta"]).toBe("computer-use-2025-01-24");
+
+    // Negative case: plain call should not set the beta header.
+    await p.chat({
+      model: "claude-sonnet-4-5-20250514",
+      messages: [{ role: "user", content: "plain" }],
+    });
+    expect(lastHeaders?.["anthropic-beta"]).toBeUndefined();
   });
 });

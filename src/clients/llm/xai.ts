@@ -115,7 +115,17 @@ function translateCall(input: LlmCall): GrokCallInput {
     userInput,
   };
 
-  if (input.tools && input.tools.length > 0) call.tools = input.tools as GrokTool[];
+  if (input.tools && input.tools.length > 0) {
+    const filtered: GrokTool[] = [];
+    for (const t of input.tools) {
+      if (t.type === "computer_use") {
+        log.warn({ svc: "xai", tool: "computer_use" }, "llm.computer_use_unsupported");
+        continue;
+      }
+      filtered.push(t as GrokTool);
+    }
+    if (filtered.length > 0) call.tools = filtered;
+  }
   if (input.toolChoice !== undefined) call.toolChoice = input.toolChoice;
   if (input.parallelToolCalls !== undefined) call.parallelToolCalls = input.parallelToolCalls;
   if (input.maxTurns !== undefined) call.maxTurns = input.maxTurns;

@@ -229,6 +229,10 @@ function partitionTools(tools: LlmTool[]): {
       mcpDropped += 1;
       continue;
     }
+    if (t.type === "computer_use") {
+      log.warn({ svc: "gemini", tool: "computer_use" }, "llm.computer_use_unsupported");
+      continue;
+    }
     if (isFunctionTool(t)) {
       functionTools.push({
         name: t.function.name,

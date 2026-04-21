@@ -76,6 +76,11 @@ function splitTools(tools: readonly LlmTool[] | undefined): {
       };
       if (ft.function.strict !== undefined) fn["strict"] = ft.function.strict;
       functions.push({ type: "function", function: fn });
+    } else if (t.type === "computer_use") {
+      // OpenAI Chat Completions doesn't support Anthropic's computer-use tool
+      // surface. Drop explicitly with a capability warn so the caller can
+      // audit unsupported requests without blowing up the call.
+      log.warn({ svc: "openai", tool: "computer_use" }, "llm.computer_use_unsupported");
     } else {
       droppedKinds.push(t.type);
     }
