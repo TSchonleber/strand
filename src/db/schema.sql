@@ -29,6 +29,7 @@ CREATE INDEX IF NOT EXISTS idx_action_log_status ON action_log(status);
 CREATE INDEX IF NOT EXISTS idx_action_log_kind ON action_log(kind);
 CREATE INDEX IF NOT EXISTS idx_action_log_created ON action_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_action_log_target ON action_log(target_entity_id);
+CREATE INDEX IF NOT EXISTS idx_action_log_decision ON action_log(decision_id);
 
 CREATE TABLE IF NOT EXISTS cooldowns (
   scope TEXT NOT NULL,           -- 'target:<userId>' or 'pair:<a>:<b>'
@@ -36,6 +37,8 @@ CREATE TABLE IF NOT EXISTS cooldowns (
   until_at INTEGER NOT NULL,     -- ms epoch
   PRIMARY KEY (scope, kind)
 );
+
+CREATE INDEX IF NOT EXISTS idx_cooldowns_until ON cooldowns(until_at);
 
 CREATE TABLE IF NOT EXISTS human_review_queue (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,3 +82,28 @@ CREATE TABLE IF NOT EXISTS dlq (
 );
 
 -- Existing rate_counters table is created by RateLimiter at boot.
+
+CREATE TABLE IF NOT EXISTS consolidator_runs (
+  id TEXT PRIMARY KEY,
+  batch_id TEXT,
+  status TEXT NOT NULL,  -- queued | in_progress | completed | failed | partial
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  completed_at TEXT,
+  summary_json TEXT,
+  error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_consolidator_runs_status ON consolidator_runs(status);
+
+CREATE TABLE IF NOT EXISTS reasoner_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tick_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  response_id TEXT,
+  previous_response_id TEXT,
+  candidate_count INTEGER NOT NULL DEFAULT 0,
+  tool_call_count INTEGER NOT NULL DEFAULT 0,
+  usage_json TEXT,
+  cost_in_usd_ticks INTEGER,
+  stuck_mid_thought INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_reasoner_runs_tick ON reasoner_runs(tick_at);
+CREATE INDEX IF NOT EXISTS idx_reasoner_runs_stuck ON reasoner_runs(stuck_mid_thought);
