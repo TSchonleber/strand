@@ -66,14 +66,22 @@ export function _resetLlmForTests(): void {
   _provider = null;
 }
 
-export { hasBatch, LlmCapabilityError, LlmPrecheckError } from "./provider";
+export {
+  hasBatch,
+  hasBatchPoll,
+  hasInlineBatch,
+  LlmCapabilityError,
+  LlmPrecheckError,
+} from "./provider";
 export type { LlmProvider } from "./provider";
 export type {
   LlmBatchCreateArgs,
+  LlmBatchCreateInlineArgs,
   LlmBatchHandle,
   LlmBatchResultLine,
   LlmCall,
   LlmCapabilities,
+  LlmInlineBatchRequest,
   LlmMessage,
   LlmResult,
   LlmStructuredOutput,

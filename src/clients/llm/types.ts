@@ -217,7 +217,12 @@ export type LlmBatchStatus =
 export interface LlmBatchHandle {
   id: string;
   status: LlmBatchStatus;
-  input_file_id: string;
+  /**
+   * Input file id for file-based batch providers (xAI, OpenAI). Absent for
+   * inline-batch providers (Anthropic) — their request bodies are posted
+   * directly, not via a prior file upload.
+   */
+  input_file_id?: string;
   output_file_id?: string;
   error_file_id?: string;
   created_at: number;
@@ -239,6 +244,25 @@ export interface LlmBatchCreateArgs {
   /** Provider-specific. xAI: "/v1/responses" or "/v1/chat/completions". OpenAI: same. */
   endpoint?: string;
   /** xAI + OpenAI accept "24h". */
+  completionWindow?: string;
+  /** Metadata pass-through. */
+  metadata?: Record<string, string>;
+}
+
+/**
+ * One request in an inline-batch POST (Anthropic path). `body` is the
+ * provider-native request shape (e.g. MessageCreateParams for Anthropic).
+ * Adapters that support inline batches accept an array of these and send them
+ * in a single call — no prior file upload.
+ */
+export interface LlmInlineBatchRequest {
+  custom_id: string;
+  body: Record<string, unknown>;
+}
+
+export interface LlmBatchCreateInlineArgs {
+  requests: LlmInlineBatchRequest[];
+  /** Optional. Anthropic doesn't accept it today; kept for symmetry. */
   completionWindow?: string;
   /** Metadata pass-through. */
   metadata?: Record<string, string>;

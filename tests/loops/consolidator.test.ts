@@ -513,6 +513,97 @@ describe("consolidatorPoll", () => {
   });
 });
 
+describe("consolidatorRun — inline-batch path (Anthropic-style)", () => {
+  it("uses batchCreateInline (no file upload) and inserts a queued row", async () => {
+    const batchCreateInlineMock = vi.fn(async ({ requests }: { requests: unknown[] }) => ({
+      id: "msgbatch_inline",
+      status: "in_progress" as const,
+      created_at: Math.floor(Date.now() / 1000),
+      request_counts: { total: requests.length, completed: 0, failed: 0 },
+    }));
+    const filesUploadMock = vi.fn();
+
+    const mockProvider = {
+      name: "anthropic",
+      capabilities: {
+        structuredOutput: true,
+        mcp: true,
+        serverSideTools: [] as readonly string[],
+        batch: true,
+        promptCacheKey: true,
+        previousResponseId: false,
+        functionToolLoop: true,
+        computerUse: true,
+        maxContextTokens: 200_000,
+      },
+      chat: vi.fn(),
+      batchCreateInline: batchCreateInlineMock,
+      batchGet: vi.fn(),
+      batchResults: vi.fn(),
+      buildBatchLine: (_call: unknown, customId: string) => ({
+        custom_id: customId,
+        method: "POST" as const,
+        url: "/v1/messages",
+        body: {
+          model: "claude-sonnet-4-5-20250514",
+          max_tokens: 2000,
+          messages: [{ role: "user", content: "x" }],
+        },
+      }),
+      filesUpload: filesUploadMock,
+    };
+
+    const llmModule = await import("@/clients/llm");
+    const llmSpy = vi.spyOn(llmModule, "llm").mockReturnValue(mockProvider as never);
+
+    try {
+      const { consolidatorRunWithResult } = await import("@/loops/consolidator");
+      const result = await consolidatorRunWithResult();
+
+      expect(result.batchId).toBe("msgbatch_inline");
+      expect(filesUploadMock).not.toHaveBeenCalled();
+      expect(batchCreateInlineMock).toHaveBeenCalledTimes(1);
+
+      const args = batchCreateInlineMock.mock.calls[0]?.[0] as {
+        requests: Array<{ custom_id: string; body: Record<string, unknown> }>;
+      };
+      expect(args.requests).toHaveLength(5);
+      const customIds = args.requests.map((r) => r.custom_id);
+      expect(customIds).toEqual(
+        expect.arrayContaining([
+          "consolidator:dream_cycle",
+          "consolidator:consolidation_run",
+          "consolidator:gaps_scan",
+          "consolidator:retirement_analysis",
+          "consolidator:reflexion_write",
+        ]),
+      );
+      // body shape is Anthropic-native (no method/url envelope leaked).
+      expect(args.requests[0]?.body?.["model"]).toBe("claude-sonnet-4-5-20250514");
+      expect(args.requests[0]?.body?.["method"]).toBeUndefined();
+      expect(args.requests[0]?.body?.["url"]).toBeUndefined();
+
+      const row = db()
+        .prepare(
+          "SELECT id, batch_id, status, completed_at, summary_json FROM consolidator_runs WHERE id = ?",
+        )
+        .get(result.runId) as {
+        id: string;
+        batch_id: string;
+        status: string;
+        completed_at: string | null;
+        summary_json: string | null;
+      };
+      expect(row.batch_id).toBe("msgbatch_inline");
+      expect(row.status).toBe("queued");
+      expect(row.completed_at).toBeNull();
+      expect(row.summary_json).toBeNull();
+    } finally {
+      llmSpy.mockRestore();
+    }
+  });
+});
+
 describe("consolidatorRun — sync fallback (Anthropic-style, no batch)", () => {
   it("runs every task via provider.chat() and stores completed row with local: batch id", async () => {
     const chatMock = vi.fn(async () => ({

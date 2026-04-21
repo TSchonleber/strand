@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { GROK_CONSOLIDATOR_TOOLS } from "@/clients/brain";
 import { brainctlMcpTool } from "@/clients/grok";
-import { hasBatch, llm } from "@/clients/llm";
+import { hasBatch, hasBatchPoll, hasInlineBatch, llm } from "@/clients/llm";
 import type { LlmCall, LlmMcpTool, LlmTool } from "@/clients/llm/types";
 import { env } from "@/config";
 import { db } from "@/db";
@@ -156,6 +156,37 @@ export async function consolidatorRunWithResult(): Promise<ConsolidatorRunResult
   const runId = randomUUID();
   const provider = llm();
 
+  // Inline batch (Anthropic) — no file upload. Try this first; adapters that
+  // support it get a single round-trip to /v1/messages/batches.
+  if (hasInlineBatch(provider) && typeof provider.buildBatchLine === "function") {
+    const buildLine = provider.buildBatchLine.bind(provider);
+    const requests = TASKS.map((task) => {
+      const line = buildLine(taskToLlmCall(task), `consolidator:${task.id}`);
+      return { custom_id: line.custom_id, body: line.body };
+    });
+    const batch = await provider.batchCreateInline({ requests });
+
+    db()
+      .prepare(
+        `INSERT INTO consolidator_runs (id, batch_id, status, created_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(runId, batch.id, "queued", nowIso());
+
+    log.info(
+      {
+        runId,
+        batchId: batch.id,
+        provider: provider.name,
+        taskCount: TASKS.length,
+        durationMs: Date.now() - t0,
+      },
+      "consolidator.run.submitted_inline",
+    );
+
+    return { runId, batchId: batch.id };
+  }
+
   if (hasBatch(provider) && typeof provider.buildBatchLine === "function") {
     const buildLine = provider.buildBatchLine.bind(provider);
     const lines: string[] = [];
@@ -285,7 +316,7 @@ export async function consolidatorPoll(): Promise<void> {
   }
 
   const provider = llm();
-  if (!hasBatch(provider)) {
+  if (!hasBatchPoll(provider)) {
     log.warn(
       { provider: provider.name, openRows: openRows.length },
       "consolidator.poll.provider_has_no_batch",
@@ -369,7 +400,7 @@ async function aggregateResults(batchId: string): Promise<AggregatedSummary> {
   };
 
   const provider = llm();
-  if (!hasBatch(provider)) {
+  if (!hasBatchPoll(provider)) {
     out.failed_tasks.push(`${batchId}: provider ${provider.name} has no batch results path`);
     return out;
   }
@@ -431,6 +462,37 @@ function extractOutputText(body: Record<string, unknown>): string | null {
       }
     }
     if (parts.length > 0) return parts.join("");
+  }
+
+  // Anthropic Messages API (inline-batch result): body.content is an array of
+  // blocks; join text blocks. For structured output, the payload is carried
+  // as a tool_use block input — walk that too and JSON-stringify so the
+  // downstream JSON.parse still lands on the summary object.
+  if (body["type"] === "message" || (Array.isArray(body["content"]) && !body["choices"])) {
+    const content = body["content"];
+    if (Array.isArray(content)) {
+      const texts: string[] = [];
+      for (const block of content) {
+        if (typeof block !== "object" || block === null) continue;
+        const bb = block as Record<string, unknown>;
+        if (bb["type"] === "text" && typeof bb["text"] === "string") {
+          texts.push(bb["text"] as string);
+        } else if (bb["type"] === "tool_use" && typeof bb["name"] === "string") {
+          // Consolidator synthesizes `emit_consolidator_summary`; its input is
+          // the structured summary. Stringify so the existing JSON.parse path
+          // works unchanged.
+          const name = bb["name"] as string;
+          if (name.startsWith("emit_") && bb["input"] !== undefined) {
+            try {
+              return JSON.stringify(bb["input"]);
+            } catch {
+              // fall through to text join
+            }
+          }
+        }
+      }
+      if (texts.length > 0) return texts.join("");
+    }
   }
 
   // Chat Completions (OpenAI-shaped): body.choices[0].message.content
