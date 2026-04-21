@@ -1,0 +1,349 @@
+# Strand — agent harness architecture (D2 source).
+# Render:
+#   d2 --layout=elk --theme=200 --dark-theme=200 --pad=48 \
+#      docs/diagrams/strand-architecture.d2 \
+#      docs/diagrams/strand-architecture.svg
+
+vars: {
+  d2-config: {
+    layout-engine: elk
+    pad: 48
+    theme-id: 200
+    dark-theme-id: 200
+  }
+}
+
+title: |md
+# Strand — agent harness
+four loops · typestate policy gate · brainctl memory · xAI Grok reasoning
+| {
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# ═════════════════════ External services ═════════════════════
+
+external: External services {
+  near: top-center
+
+  x: X API v2 {
+    shape: cloud
+    tooltip: "OAuth 2.0 PKCE · Basic tier 10k posts/mo · no follow endpoint · refresh tokens rotate every call"
+  }
+  x-endpoints: |md
+    **reads** `GET /2/users/:id/mentions`
+    `GET /2/timelines/reverse_chronological`
+    `GET /2/dm_events`
+
+    **writes** `POST /2/tweets` (no idempotency header)
+    `POST /2/users/:id/likes`
+    `POST /2/dm_conversations/with/:id/messages`
+  | {
+    shape: text
+    style.font-size: 12
+  }
+  x -- x-endpoints {
+    style.stroke-dash: 2
+    style.opacity: 0.6
+  }
+
+  xai: xAI Responses API {
+    shape: cloud
+    tooltip: "grok-4.20-reasoning · grok-4-1-fast-non-reasoning · refusal tax 0.05 USD/req (pre-filter locally)"
+  }
+  xai-endpoints: |md
+    `POST /v1/responses` · sync reasoning
+    `POST /v1/files` · JSONL upload
+    `POST /v1/batches` · async · 50% off
+
+    `max_turns: 5`
+    `prompt_cache_key` per loop+tenant
+    `include: [mcp_call_output, reasoning.enc, x_search.sources]`
+  | {
+    shape: text
+    style.font-size: 12
+  }
+  xai -- xai-endpoints {
+    style.stroke-dash: 2
+    style.opacity: 0.6
+  }
+
+  brain: brainctl {
+    shape: cylinder
+    tooltip: "Dual surface: remote MCP (HTTP/SSE) for Grok with READ allowlist · local stdio MCP for TS-direct writes"
+  }
+  brain-tools: |md
+    **READ allowlist (Grok)**
+    `memory_search` · `entity_get` · `entity_search`
+    `context_search` · `tom_perspective_get`
+    `policy_match` · `reason` · `temporal_*`
+
+    **+ consolidator writes**
+    `reflexion_write` · `dream_cycle`
+    `consolidation_run` · `gaps_scan`
+    `retirement_analysis`
+
+    **NEVER exposed**
+    `memory_add` · `entity_create` · `event_add`
+    `belief_set` · `policy_add` · `trust_*` · `backup`
+  | {
+    shape: text
+    style.font-size: 12
+  }
+  brain -- brain-tools {
+    style.stroke-dash: 2
+    style.opacity: 0.6
+  }
+}
+
+# ═════════════════════ Strand process ═════════════════════
+
+strand: strand process {
+  style.stroke: "#3b82f6"
+  style.stroke-width: 2
+  tooltip: "src/orchestrator.ts — in-process intervals (dev) · BullMQ per loop (prod)"
+
+  # ─── perceiver ───
+  perceiver: |md
+    ## Perceiver
+    **every 120 s**
+    src/loops/perceiver.ts
+
+    • own mentions (sinceId)
+    • home timeline
+    • DM events
+    • NO external scouting (Grok owns x_search)
+  | {
+    shape: rectangle
+    style.fill: "#1e3a8a"
+    style.stroke: "#3b82f6"
+    style.font-color: "#dbeafe"
+  }
+
+  # ─── reasoner ───
+  reasoner: |md
+    ## Reasoner
+    **every 300 s · grok-4.20-reasoning**
+    src/loops/reasoner.ts
+
+    reads last 50 `perceived_events`
+    emits up to 10 `CandidateEnvelope[]`
+
+    `promptCacheKey: strand:reasoner:v1`
+    `maxTurns: 5` · `parallelToolCalls`
+    tools: x_search · web_search · brainctl MCP
+    schema: `anyOf` per action.kind
+
+    stuck-mid-thought → retry with
+    `previous_response_id`
+  | {
+    shape: rectangle
+    style.fill: "#4c1d95"
+    style.stroke: "#a78bfa"
+    style.font-color: "#ede9fe"
+  }
+
+  # ─── gate ───
+  gate: |md
+    ## Policy Gate
+    **8 rules · typestate**
+
+    1 banned_topic
+    2 prefilter (regex+topic+embedding)
+    3 rate caps (day + hour)
+    4 cooldowns (per-target)
+    5 relevance ≥ 0.65
+    6 dup cos < 0.85 (7d)
+    7 diversity (cluster + kind)
+    8 dm mutual required
+    + human_review
+
+    mints `Candidate<"approved">`
+    (Actor signature rejects anything else)
+  | {
+    shape: hexagon
+    style.fill: "#7f1d1d"
+    style.stroke: "#ef4444"
+    style.stroke-width: 3
+    style.font-color: "#fee2e2"
+    style.bold: true
+  }
+
+  # ─── actor ───
+  actor: |md
+    ## Actor
+    **event-driven · shadow/gated/live**
+    src/loops/actor.ts
+
+    accepts only `Candidate<"approved">`
+
+    1. SHA-256 idempotency
+       `normalize(text) + reply_to + quote_id + media`
+    2. dispatch per action.kind
+       like · bookmark · post · reply · quote · dm
+       follow/unfollow (Pro gated)
+    3. rate counters++ · cooldowns
+    4. `brain.outcome_annotate`
+  | {
+    shape: rectangle
+    style.fill: "#78350f"
+    style.stroke: "#f59e0b"
+    style.font-color: "#fef3c7"
+  }
+
+  # ─── consolidator ───
+  consolidator: |md
+    ## Consolidator
+    **submit 24 h · poll 30 min**
+    _poll not yet wired_
+
+    xAI Batch API · 50% off
+
+    JSONL: dream_cycle · consolidation_run
+    gaps_scan · retirement_analysis
+    reflexion_write
+
+    `grokFilesUpload` → `grokBatchCreate`
+    → `consolidator_runs` status=queued
+    poll → aggregate summary_json
+  | {
+    shape: rectangle
+    style.fill: "#083344"
+    style.stroke: "#06b6d4"
+    style.font-color: "#cffafe"
+  }
+
+  # ─── sqlite ───
+  sqlite: |md
+    ## SQLite ops store
+    src/db/schema.sql
+
+    `action_log` idempotency_key UK
+    `cooldowns` · `rate_counters`
+    `reasoner_runs` · `consolidator_runs`
+    `post_embeddings` (7d dup window)
+    `perceived_events` · `dlq`
+    `human_review_queue`
+
+    _brain.db owns the semantic layer —_
+    _strand.db is audit + ops only_
+  | {
+    shape: cylinder
+    style.fill: "#042f2e"
+    style.stroke: "#14b8a6"
+    style.font-color: "#ccfbf1"
+  }
+
+  # ─── intra edges ───
+  perceiver -> sqlite: "INSERT perceived_events"
+  sqlite -> reasoner: "SELECT last 50 events" { style.stroke-dash: 3 }
+  reasoner -> gate: "CandidateEnvelope[]" {
+    style.stroke: "#a78bfa"
+    style.stroke-width: 2
+  }
+  gate -> actor: "Candidate<approved>" {
+    style.stroke: "#10b981"
+    style.stroke-width: 3
+    style.bold: true
+  }
+  gate -> sqlite: "rejected → action_log + reasons[]" {
+    style.stroke: "#f87171"
+    style.stroke-dash: 3
+  }
+  actor -> sqlite: "action_log + rate_counters"
+  reasoner -> sqlite: "reasoner_runs"
+  consolidator -> sqlite: "consolidator_runs"
+}
+
+# ═════════════════════ External ↔ Strand ═════════════════════
+
+external.x -> strand.perceiver: "poll" {
+  style.stroke: "#38bdf8"
+  style.stroke-width: 2
+}
+strand.actor -> external.x: "writes" {
+  style.stroke: "#38bdf8"
+  style.stroke-width: 3
+  style.bold: true
+}
+external.xai -> strand.reasoner: "/v1/responses" {
+  style.stroke: "#c084fc"
+  style.stroke-width: 2
+}
+external.xai -> strand.consolidator: "Batch API" {
+  style.stroke: "#c084fc"
+  style.stroke-dash: 4
+}
+external.brain -> strand.reasoner: "MCP read" {
+  style.stroke: "#10b981"
+  style.stroke-width: 2
+}
+external.brain -> strand.consolidator: "MCP read + consolidation" {
+  style.stroke: "#10b981"
+  style.stroke-dash: 4
+}
+strand.perceiver -> external.brain: "event_add" {
+  style.stroke: "#10b981"
+  style.stroke-dash: 2
+}
+strand.actor -> external.brain: "outcome_annotate" {
+  style.stroke: "#10b981"
+  style.stroke-dash: 2
+}
+
+# ═════════════════════ Phase status ═════════════════════
+
+status: Phase status {
+  near: bottom-center
+  grid-columns: 3
+  grid-gap: 24
+
+  wired: |md
+    ### ✓ wired on main
+    • typestate gate
+    • reasoner schema + cache key + chaining
+    • consolidator Batch submit + poll helpers
+    • brainctl r/w surface
+    • prefilter (regex + topic + embedding)
+    • `grokCompose` library
+    • `replay-shadow` regression tool
+    • 84 tests green · smoke 254 ms
+  | {
+    shape: rectangle
+    style.fill: "#064e3b"
+    style.stroke: "#10b981"
+    style.font-color: "#d1fae5"
+  }
+
+  next: |md
+    ### ⟳ next
+    • wire `consolidatorPoll` into orchestrator
+    • phase 3: 48 h perceiver on real X creds
+    • label 100 candidates
+    • ≥ 80% shadow agreement
+    • phase 4+: composer opt-in (two-stage)
+    • phase 7: Pro tier → follow variant live
+  | {
+    shape: rectangle
+    style.fill: "#451a03"
+    style.stroke: "#f59e0b"
+    style.font-color: "#fde68a"
+  }
+
+  never: |md
+    ### ✕ never
+    • DMs to non-mutuals
+    • action bypassing the policy gate
+    • brainctl mutations via Grok MCP
+    • prompts as inline strings
+    • Deferred Completions for Consolidator
+    • follow variant on Basic tier
+  | {
+    shape: rectangle
+    style.fill: "#450a0a"
+    style.stroke: "#ef4444"
+    style.font-color: "#fecaca"
+  }
+}
