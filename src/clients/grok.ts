@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import type { LlmMessage } from "@/clients/llm/types";
 import { env } from "@/config";
 import { log } from "@/util/log";
 import { prefilterComposerText } from "@/util/prefilter";
@@ -81,8 +82,28 @@ export type GrokInclude =
 
 export interface GrokCallInput {
   model: string;
-  systemPrompts: string[]; // concatenated as static prefix for caching
+  /**
+   * Legacy single-turn path. Concatenated as static prefix for caching.
+   * Ignored when `messages` is set.
+   */
+  systemPrompts: string[];
+  /** Legacy single-turn user task. Ignored when `messages` is set. */
   userInput: string;
+  /**
+   * Full message history for multi-turn conversations with tool-call
+   * round-tripping. When set, takes precedence over `systemPrompts` +
+   * `userInput`. Translated to xAI Responses API `input` items:
+   *   - role system/user/assistant text → `{ role, content }`
+   *   - assistant with toolCalls → one `{ type: "function_call", call_id,
+   *     name, arguments }` item per tool call (text content, if any, emitted
+   *     as a separate assistant message before the calls)
+   *   - role tool + toolCallId → `{ type: "function_call_output", call_id,
+   *     output }`
+   *
+   * xAI mirrors the OpenAI Responses API shape here; the `call_id` field on
+   * input history items is what ties `function_call` → `function_call_output`.
+   */
+  messages?: LlmMessage[];
   tools?: GrokTool[];
   toolChoice?: "auto" | "required" | "none" | { type: "function"; function: { name: string } };
   parallelToolCalls?: boolean;
@@ -121,8 +142,61 @@ export interface GrokCallOutput<T = unknown> {
     /** xAI cost meter: integer, units of 1e-10 USD. Divide by 1e10 for dollars. */
     costInUsdTicks: number;
   };
-  toolCalls: Array<{ name: string; args: unknown }>;
+  toolCalls: Array<{ id?: string; name: string; args: unknown }>;
   rawResponse: unknown;
+}
+
+/**
+ * Translate a provider-agnostic `LlmMessage[]` into an xAI Responses API
+ * `input` array. xAI mirrors the OpenAI Responses shape:
+ *   - plain role messages: `{ role, content }` (system/user/assistant)
+ *   - assistant tool calls: one `{ type: "function_call", call_id, name,
+ *     arguments }` item per call. `arguments` must be a string (JSON-encoded).
+ *   - tool results: `{ type: "function_call_output", call_id, output }`.
+ *     `output` must be a string.
+ *
+ * The wrapper agentic loop synthesizes `fc-${i}` ids when adapters don't
+ * surface one, so `call_id` is always populated.
+ */
+function buildInputFromMessages(messages: LlmMessage[]): Array<Record<string, unknown>> {
+  const input: Array<Record<string, unknown>> = [];
+
+  for (const m of messages) {
+    if (m.role === "tool") {
+      // xAI (Responses) expects function_call_output items keyed by call_id.
+      input.push({
+        type: "function_call_output",
+        call_id: m.toolCallId ?? "",
+        output: m.content,
+      });
+      continue;
+    }
+
+    if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
+      // Emit any assistant text first so the conversation order is preserved,
+      // then one function_call item per tool call.
+      if (m.content) {
+        input.push({ role: "assistant", content: m.content });
+      }
+      for (const tc of m.toolCalls) {
+        const args = typeof tc.args === "string" ? tc.args : JSON.stringify(tc.args ?? {});
+        const item: Record<string, unknown> = {
+          type: "function_call",
+          call_id: tc.id ?? "",
+          name: tc.name,
+          arguments: args,
+        };
+        if (tc.id) item["id"] = tc.id;
+        input.push(item);
+      }
+      continue;
+    }
+
+    // system | user | assistant (text only)
+    input.push({ role: m.role, content: m.content });
+  }
+
+  return input;
 }
 
 /**
@@ -133,10 +207,13 @@ export interface GrokCallOutput<T = unknown> {
 function buildRequest(input: GrokCallInput): Record<string, unknown> {
   const req: Record<string, unknown> = {
     model: input.model,
-    input: [
-      ...input.systemPrompts.map((content) => ({ role: "system", content })),
-      { role: "user", content: input.userInput },
-    ],
+    input:
+      input.messages && input.messages.length > 0
+        ? buildInputFromMessages(input.messages)
+        : [
+            ...input.systemPrompts.map((content) => ({ role: "system", content })),
+            { role: "user", content: input.userInput },
+          ],
   };
 
   if (input.tools && input.tools.length > 0) req["tools"] = input.tools;
@@ -227,16 +304,24 @@ export async function grokCall<T = unknown>(input: GrokCallInput): Promise<GrokC
   return { outputText, parsed, responseId, systemFingerprint, usage, toolCalls, rawResponse: resp };
 }
 
-function extractToolCalls(resp: Record<string, unknown>): Array<{ name: string; args: unknown }> {
-  const out: Array<{ name: string; args: unknown }> = [];
+function extractToolCalls(
+  resp: Record<string, unknown>,
+): Array<{ id?: string; name: string; args: unknown }> {
+  const out: Array<{ id?: string; name: string; args: unknown }> = [];
   const output = (resp["output"] as unknown[] | undefined) ?? [];
   for (const item of output) {
     const i = item as Record<string, unknown>;
     if (i["type"] === "tool_use" || i["type"] === "function_call") {
-      out.push({
+      // xAI function_call items carry both `id` (fc-style) and `call_id`
+      // (echoing what must be referenced in function_call_output). Prefer
+      // call_id since that's the correlation key the loop round-trips.
+      const rawId = i["call_id"] ?? i["id"];
+      const call: { id?: string; name: string; args: unknown } = {
         name: String(i["name"] ?? "unknown"),
         args: i["arguments"] ?? i["input"] ?? null,
-      });
+      };
+      if (typeof rawId === "string" && rawId.length > 0) call.id = rawId;
+      out.push(call);
     }
   }
   return out;
@@ -365,10 +450,13 @@ export function buildBatchRequestLine(args: {
 export function buildResponsesBody(input: GrokCallInput): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: input.model,
-    input: [
-      ...input.systemPrompts.map((content) => ({ role: "system", content })),
-      { role: "user", content: input.userInput },
-    ],
+    input:
+      input.messages && input.messages.length > 0
+        ? buildInputFromMessages(input.messages)
+        : [
+            ...input.systemPrompts.map((content) => ({ role: "system", content })),
+            { role: "user", content: input.userInput },
+          ],
   };
 
   if (input.tools && input.tools.length > 0) body["tools"] = input.tools;

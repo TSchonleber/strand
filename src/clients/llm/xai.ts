@@ -18,23 +18,21 @@ import type {
   LlmBatchResultLine,
   LlmCall,
   LlmCapabilities,
-  LlmMessage,
   LlmResult,
 } from "./types";
 
 /**
  * xAI adapter. Thin wrapper over the existing `grokCall` + batch helpers in
  * `src/clients/grok.ts`. We do NOT reimplement the wire format — this file
- * only translates between `LlmCall` / `LlmResult` and the legacy
- * `GrokCallInput` / `GrokCallOutput` shapes.
+ * only translates between `LlmCall` / `LlmResult` and `GrokCallInput` /
+ * `GrokCallOutput`.
  *
- * Known v1 limitations (documented here, caller beware):
- *  - `LlmCall.messages` → `GrokCallInput.systemPrompts` + `userInput` is a
- *    lossy translation. The existing grok client does not model multi-turn
- *    user/assistant/tool history; we concatenate non-system messages into a
- *    single user input with `[role]` prefixes. When the factory migration
- *    rewrites loops off `grokCall` directly, lift that restriction by
- *    extending the base client to accept a full message array.
+ * Multi-turn: `LlmCall.messages` is passed through natively via
+ * `GrokCallInput.messages`. `grokCall` handles the LlmMessage → Responses
+ * API input-item translation (tool_calls → `function_call`, role:"tool" →
+ * `function_call_output`). The legacy prefix-collapse path is gone.
+ *
+ * Known v1 limitations:
  *  - `LlmCall.providerOptions` is dropped with a warn — no escape hatch in
  *    `GrokCallInput` yet. Extend `GrokCallInput` first if a caller needs it.
  */
@@ -59,35 +57,6 @@ const XAI_INCLUDE_VALUES: readonly GrokInclude[] = [
   "inline_citations",
 ];
 
-function splitMessages(messages: LlmMessage[]): {
-  systemPrompts: string[];
-  userInput: string;
-} {
-  const systemPrompts: string[] = [];
-  const nonSystem: LlmMessage[] = [];
-
-  for (const m of messages) {
-    if (m.role === "system") {
-      systemPrompts.push(m.content);
-    } else {
-      nonSystem.push(m);
-    }
-  }
-
-  // Fast path: exactly one user message → pass content through verbatim.
-  if (nonSystem.length === 1 && nonSystem[0]?.role === "user") {
-    return { systemPrompts, userInput: nonSystem[0].content };
-  }
-
-  // Multi-turn fallback: collapse with role prefixes. v1 limitation.
-  const parts: string[] = [];
-  for (const m of nonSystem) {
-    const prefix = m.role === "user" ? "[user]" : m.role === "assistant" ? "[assistant]" : "[tool]";
-    parts.push(`${prefix} ${m.content}`);
-  }
-  return { systemPrompts, userInput: parts.join("\n\n") };
-}
-
 function filterIncludes(include: string[] | undefined): GrokInclude[] | undefined {
   if (!include || include.length === 0) return undefined;
   const out: GrokInclude[] = [];
@@ -100,8 +69,6 @@ function filterIncludes(include: string[] | undefined): GrokInclude[] | undefine
 }
 
 function translateCall(input: LlmCall): GrokCallInput {
-  const { systemPrompts, userInput } = splitMessages(input.messages);
-
   if (input.providerOptions && Object.keys(input.providerOptions).length > 0) {
     log.warn(
       { svc: "xai", keys: Object.keys(input.providerOptions) },
@@ -109,10 +76,15 @@ function translateCall(input: LlmCall): GrokCallInput {
     );
   }
 
+  // Native multi-turn: hand the full message array to the base client and
+  // let it emit the proper xAI Responses API `input` items (including
+  // function_call / function_call_output for tool round-trips).
+  // systemPrompts + userInput stay empty — ignored when `messages` is set.
   const call: GrokCallInput = {
     model: input.model,
-    systemPrompts,
-    userInput,
+    systemPrompts: [],
+    userInput: "",
+    messages: input.messages,
   };
 
   if (input.tools && input.tools.length > 0) call.tools = input.tools as GrokTool[];
