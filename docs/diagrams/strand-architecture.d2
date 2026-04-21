@@ -136,9 +136,12 @@ strand: strand process {
     **NoopExecutor** (default) — shadow-mode,
     logs intent, never touches the host
 
-    **DockerExecutor** (stub) — target backend,
-    real sandbox is follow-up engagement
-    (Xvfb + xdotool + ffmpeg + `docker exec`)
+    **DockerExecutor** (implemented) — real sandbox
+    Xvfb + fluxbox + x11vnc + xdotool + scrot
+    via `docker exec`. `markSafe()` gate required
+    before gated/live use. 16 KB bash cap,
+    64 KB stdout truncation, argv-only injection
+    (no shell interpolation).
 
     screenshot · click · type · key · scroll
     bash · textEditor · cursorPosition · wait
@@ -305,16 +308,19 @@ status: Phase status {
 
   wired: |md
     ### ✓ wired on main
-    • typestate gate · reasoner schema + cache + chaining
+    • typestate gate · reasoner via runAgenticLoop
     • 4 adapters: openai-compat · anthropic · xai · gemini
     • `llm()` factory + capabilities-driven features
-    • `runAgenticLoop` — provider-agnostic tool-call iteration
+    • `runAgenticLoop` — local tool-call iteration runner
     • computer-use tool type + Anthropic native mapping
-    • `NoopExecutor` + `DockerExecutor` stub
-    • consolidator Batch (xAI + OpenAI) with sync fallback
+    • `NoopExecutor` + real `DockerExecutor`
+       (Xvfb + xdotool + scrot via `docker exec`)
+    • consolidator: xAI/OpenAI file batch · Anthropic inline
+       batch · sync fallback (Gemini) — all through hasBatch
+       / hasInlineBatch / hasBatchPoll guards
     • consolidatorPoll wired (30 min)
-    • multi-turn message history (xAI native)
-    • 150 tests · smoke 257 ms · typecheck+biome clean
+    • multi-turn message history native on xAI
+    • 177 tests · smoke 281 ms · typecheck+biome clean
   | {
     shape: rectangle
     style.fill: "#064e3b"
@@ -324,13 +330,13 @@ status: Phase status {
 
   next: |md
     ### ⟳ next
-    • real DockerExecutor sandbox (Xvfb + xdotool + ffmpeg)
     • X v2 live writes on real creds (phase 3)
     • OAuth setup + bootstrap-memory runs
     • grokCompose opt-in (two-stage composer)
-    • Anthropic inline-batch (Messages Batches)
+    • Docker image `strand-sandbox:latest` build
     • label 100 candidates · ≥ 80% shadow agreement
     • phase 7: Pro tier → follow variant live
+    • Gemini Batch API (Vertex path)
   | {
     shape: rectangle
     style.fill: "#451a03"
