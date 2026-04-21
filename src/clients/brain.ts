@@ -68,6 +68,29 @@ async function tool<T = unknown>(name: string, args: Record<string, unknown>): P
 
 // ─── Narrow TS-direct API (audit-critical paths only) ────────
 
+export interface ReadOp {
+  tool: string;
+  args: unknown;
+}
+
+export type BatchReadResult = { ok: true; value: unknown } | { ok: false; error: string };
+
+const BATCH_READ_TIMEOUT_MS = 5000;
+
+async function callToolWithTimeout(
+  name: string,
+  args: unknown,
+  timeoutMs: number,
+): Promise<unknown> {
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+    // Unref so a lingering timer never blocks process exit.
+    t.unref?.();
+  });
+  const call = tool<unknown>(name, (args as Record<string, unknown>) ?? {});
+  return Promise.race([call, timeoutPromise]);
+}
+
 export const brain = {
   // Boot
   agent_register: (args: { persona: string; goals: string[] }) => tool("agent_register", args),
@@ -75,6 +98,7 @@ export const brain = {
   // Beliefs / policies
   belief_seed: (args: { beliefs: Array<{ key: string; value: string }> }) =>
     tool("belief_seed", args),
+  belief_set: (args: { key: string; value: unknown; scope?: string }) => tool("belief_set", args),
   policy_add: (args: {
     policy_id: string;
     description: string;
@@ -86,20 +110,28 @@ export const brain = {
   // Perceiver direct writes
   event_add: (args: { kind: string; payload: unknown; entity_refs?: string[] }) =>
     tool<{ event_id: string }>("event_add", args),
-  entity_observe: (args: { entity_id?: string; handle?: string; observation: string }) =>
-    tool<{ entity_id: string }>("entity_observe", args),
+  entity_observe: (args: {
+    entity_id?: string;
+    identifier?: string;
+    handle?: string;
+    observation?: string;
+    observations?: string;
+  }) => tool<{ entity_id: string }>("entity_observe", args),
   entity_create: (args: {
     kind: string;
     name: string;
     aliases?: string[];
     attributes?: Record<string, unknown>;
   }) => tool<{ entity_id: string }>("entity_create", args),
+  entity_merge: (args: { from_ids: string[]; into_id: string }) =>
+    tool<{ merged: number }>("entity_merge", args),
   memory_add: (args: {
     text: string;
     tier?: "hot" | "warm" | "cold";
     entity_refs?: string[];
     event_refs?: string[];
   }) => tool<{ memory_id: string }>("memory_add", args),
+  memory_promote: (args: { id: string }) => tool<{ promoted: boolean }>("memory_promote", args),
 
   // Actor outcome writes
   outcome_annotate: (args: {
@@ -114,6 +146,29 @@ export const brain = {
   }) => tool("policy_feedback", args),
   trust_update_contradiction: (args: { entity_id: string; delta: number; reason: string }) =>
     tool("trust_update_contradiction", args),
+  trust_calibrate: (args: { memory_id: string; outcome: "success" | "failure" | "partial" }) =>
+    tool("trust_calibrate", args),
+
+  // TS-direct read helpers. Grok has its own copies via MCP allowlist; these
+  // are for scripts (replay, audits) that bypass Grok entirely.
+  context_search: (args: { query: string; limit?: number }) =>
+    tool<{ results: unknown[] }>("context_search", args),
+  temporal_map: (args: { since?: string }) => tool<{ map: unknown }>("temporal_map", args),
+
+  // Batched concurrent read helper. Each op gets a 5s timeout; failures
+  // surface per-op so partial results are still actionable.
+  async batchReads(ops: ReadOp[]): Promise<BatchReadResult[]> {
+    const settled = await Promise.allSettled(
+      ops.map((op) => callToolWithTimeout(op.tool, op.args, BATCH_READ_TIMEOUT_MS)),
+    );
+    return settled.map((s): BatchReadResult => {
+      if (s.status === "fulfilled") return { ok: true, value: s.value };
+      const reason = s.reason;
+      const msg =
+        reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "error";
+      return { ok: false, error: msg };
+    });
+  },
 
   // Health
   health: () => tool<{ ok: boolean }>("health", {}),
