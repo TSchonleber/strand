@@ -2,7 +2,7 @@
   "name": "strand",
   "version": "0.0.1",
   "private": true,
-  "description": "Autonomous X presence agent powered by Grok with brainctl memory",
+  "description": "Autonomous X presence agent. Provider-agnostic LLM (OpenAI-compatible, Anthropic, xAI, Gemini) with brainctl long-term memory.",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"
@@ -25,15 +25,12 @@
     "review": "tsx src/cli/review.ts"
   },
   "dependencies": {
-    "@ai-sdk/xai": "^1.0.0",
     "@anthropic-ai/sdk": "^0.90.0",
+    "@google/genai": "^1.50.1",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@xenova/transformers": "^2.17.2",
-    "ai": "^4.0.0",
     "better-sqlite3": "^11.5.0",
-    "bullmq": "^5.22.0",
     "dotenv": "^16.4.5",
-    "ioredis": "^5.4.1",
     "openai": "^4.73.0",
     "pino": "^9.5.0",
     "pino-pretty": "^11.3.0",
