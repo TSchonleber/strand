@@ -69,9 +69,7 @@ const MOCK_RESPONSE = {
 
 const server = USE_REAL_XAI
   ? null
-  : setupServer(
-      http.post("https://api.x.ai/v1/responses", () => HttpResponse.json(MOCK_RESPONSE)),
-    );
+  : setupServer(http.post("https://api.x.ai/v1/responses", () => HttpResponse.json(MOCK_RESPONSE)));
 
 server?.listen({ onUnhandledRequest: "bypass" });
 
@@ -133,9 +131,7 @@ async function main(): Promise<number> {
       )
       .run(
         `smoke_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        verdict.approved
-          ? verdict.cacheableDecisionId
-          : (c.modelResponseId ?? "smoke_no_resp"),
+        verdict.approved ? verdict.cacheableDecisionId : (c.modelResponseId ?? "smoke_no_resp"),
         c.action.kind,
         JSON.stringify(c.action),
         c.rationale,
