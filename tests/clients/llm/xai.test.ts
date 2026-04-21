@@ -249,7 +249,7 @@ describe("makeXaiProvider.chat", () => {
     ]);
   });
 
-  it("collapses multi-turn assistant/user history into one user input with role prefixes (v1 limit)", async () => {
+  it("preserves multi-turn assistant/user history natively (no prefix collapse)", async () => {
     const p = makeProvider();
     await p.chat({
       model: "grok-4-1-fast-non-reasoning",
@@ -261,12 +261,112 @@ describe("makeXaiProvider.chat", () => {
       ],
     });
     const body = responsesCalls[0]?.body as Record<string, unknown>;
-    const input = body["input"] as Array<{ role: string; content: string }>;
-    expect(input[0]).toEqual({ role: "system", content: "be concise" });
-    expect(input[1]?.role).toBe("user");
-    expect(input[1]?.content).toContain("[user] first");
-    expect(input[1]?.content).toContain("[assistant] second");
-    expect(input[1]?.content).toContain("[user] third");
+    const input = body["input"] as Array<Record<string, unknown>>;
+    expect(input).toEqual([
+      { role: "system", content: "be concise" },
+      { role: "user", content: "first" },
+      { role: "assistant", content: "second" },
+      { role: "user", content: "third" },
+    ]);
+  });
+
+  it("emits assistant toolCalls as function_call items with call_id", async () => {
+    const p = makeProvider();
+    await p.chat({
+      model: "grok-4.20-reasoning",
+      messages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "please search" },
+        {
+          role: "assistant",
+          content: "looking it up",
+          toolCalls: [
+            { id: "call_abc", name: "memory_search", args: { q: "roadmap" } },
+            { id: "call_def", name: "entity_search", args: { q: "Terrence" } },
+          ],
+        },
+      ],
+    });
+    const body = responsesCalls[0]?.body as Record<string, unknown>;
+    const input = body["input"] as Array<Record<string, unknown>>;
+    expect(input[0]).toEqual({ role: "system", content: "sys" });
+    expect(input[1]).toEqual({ role: "user", content: "please search" });
+    // assistant text preserved as its own message, preceding the calls
+    expect(input[2]).toEqual({ role: "assistant", content: "looking it up" });
+    expect(input[3]).toMatchObject({
+      type: "function_call",
+      call_id: "call_abc",
+      name: "memory_search",
+      id: "call_abc",
+    });
+    expect(JSON.parse(String(input[3]?.["arguments"]))).toEqual({ q: "roadmap" });
+    expect(input[4]).toMatchObject({
+      type: "function_call",
+      call_id: "call_def",
+      name: "entity_search",
+    });
+    expect(JSON.parse(String(input[4]?.["arguments"]))).toEqual({ q: "Terrence" });
+  });
+
+  it("emits tool-role messages as function_call_output keyed by toolCallId", async () => {
+    const p = makeProvider();
+    await p.chat({
+      model: "grok-4.20-reasoning",
+      messages: [
+        { role: "user", content: "do it" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "call_abc", name: "memory_search", args: { q: "x" } }],
+        },
+        {
+          role: "tool",
+          toolCallId: "call_abc",
+          content: '{"results":[{"id":1,"content":"fact"}]}',
+        },
+        { role: "user", content: "summarize" },
+      ],
+    });
+    const body = responsesCalls[0]?.body as Record<string, unknown>;
+    const input = body["input"] as Array<Record<string, unknown>>;
+    // [user, function_call, function_call_output, user]
+    expect(input).toHaveLength(4);
+    expect(input[0]).toEqual({ role: "user", content: "do it" });
+    expect(input[1]?.["type"]).toBe("function_call");
+    expect(input[1]?.["call_id"]).toBe("call_abc");
+    expect(input[2]).toEqual({
+      type: "function_call_output",
+      call_id: "call_abc",
+      output: '{"results":[{"id":1,"content":"fact"}]}',
+    });
+    expect(input[3]).toEqual({ role: "user", content: "summarize" });
+  });
+
+  it("preserves tool-call id from xAI function_call response items", async () => {
+    nextResponse = {
+      id: "resp_tc",
+      system_fingerprint: "fp_tc",
+      output_text: "",
+      output: [
+        {
+          type: "function_call",
+          id: "fc_ignored",
+          call_id: "call_xyz",
+          name: "memory_search",
+          arguments: '{"q":"hi"}',
+        },
+      ],
+      usage: { ...DEFAULT_USAGE },
+    };
+    const p = makeProvider();
+    const r = await p.chat({
+      model: "grok-4.20-reasoning",
+      messages: [{ role: "user", content: "search" }],
+    });
+    expect(r.toolCalls).toHaveLength(1);
+    expect(r.toolCalls[0]?.id).toBe("call_xyz");
+    expect(r.toolCalls[0]?.name).toBe("memory_search");
+    expect(r.toolCalls[0]?.args).toBe('{"q":"hi"}');
   });
 
   it("passes through x_search + mcp tools in request body", async () => {
