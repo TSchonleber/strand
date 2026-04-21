@@ -11,7 +11,7 @@ perceiver  ─▶  brainctl (MCP)  ◀─── grok (x_search, web_search, MCP 
 actor ◀── policy gate (typestate) ◀──────── reasoner (candidates)
 ```
 
-See `docs/PLAN.md` for the full build plan.
+See `docs/ARCHITECTURE.md` for the full technical map (7 Mermaid diagrams, schema, cadence tables, circuit breakers). See `PLAN.md` for the phased build plan.
 
 ## Setup
 
