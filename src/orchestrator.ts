@@ -1,7 +1,7 @@
 import { disconnect as brainDisconnect } from "@/clients/brain";
 import { closeDb, db } from "@/db";
 import { executeApproved } from "@/loops/actor";
-import { consolidatorRun } from "@/loops/consolidator";
+import { consolidatorPoll, consolidatorRun } from "@/loops/consolidator";
 import { perceiverTick } from "@/loops/perceiver";
 import { reasonerTick } from "@/loops/reasoner";
 import { evaluate, makeGate } from "@/policy";
@@ -66,8 +66,9 @@ export function start(): void {
     }),
   );
 
-  // Consolidator: every 24h roughly; for real production, wire to a cron or scheduler
+  // Consolidator: submit every 24 h, poll open batches every 30 min.
   handles.push(every(24 * 60 * 60 * 1000, "consolidator", consolidatorRun));
+  handles.push(every(30 * 60 * 1000, "consolidator-poll", consolidatorPoll));
 
   log.info({ loops: handles.map((h) => h.name) }, "orchestrator.started");
 }
