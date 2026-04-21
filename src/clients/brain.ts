@@ -154,6 +154,10 @@ export const brain = {
   context_search: (args: { query: string; limit?: number }) =>
     tool<{ results: unknown[] }>("context_search", args),
   temporal_map: (args: { since?: string }) => tool<{ map: unknown }>("temporal_map", args),
+  memory_search: (args: { query: string; limit?: number; scope?: string; tier?: string }) =>
+    tool<{ results: unknown[] }>("memory_search", args),
+  entity_get: (args: { entity_id?: string; identifier?: string; handle?: string }) =>
+    tool<{ entity: unknown }>("entity_get", args),
 
   // Batched concurrent read helper. Each op gets a 5s timeout; failures
   // surface per-op so partial results are still actionable.

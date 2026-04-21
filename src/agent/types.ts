@@ -110,13 +110,7 @@ export interface Budget {
 
 // ─── TaskGraph ──────────────────────────────────────────────────────────────
 
-export type StepStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped"
-  | "abandoned";
+export type StepStatus = "pending" | "running" | "completed" | "failed" | "skipped" | "abandoned";
 
 export interface PlanStep {
   id: string;
@@ -197,11 +191,5 @@ export interface PlanRunResult {
   totalToolCalls: number;
   durationMs: number;
   /** What stopped the run — for observability. */
-  stopReason:
-    | "completed"
-    | "failed"
-    | "budget_exceeded"
-    | "abort"
-    | "max_depth"
-    | "error";
+  stopReason: "completed" | "failed" | "budget_exceeded" | "abort" | "max_depth" | "error";
 }
