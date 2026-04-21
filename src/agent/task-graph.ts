@@ -226,7 +226,7 @@ export class SqliteTaskGraphStore implements TaskGraphStore {
       | undefined;
     if (!gRow) return null;
     const stepRows = this.db
-      .prepare("SELECT * FROM agent_task_steps WHERE graph_id = ? ORDER BY created_at, id")
+      .prepare("SELECT * FROM agent_task_steps WHERE graph_id = ? ORDER BY rowid")
       .all(id) as StepRow[];
     return rowToGraph(gRow, stepRows.map(rowToStep));
   }
@@ -263,7 +263,7 @@ export class SqliteTaskGraphStore implements TaskGraphStore {
       .prepare("SELECT * FROM agent_task_graphs WHERE status = ? ORDER BY updated_at DESC LIMIT ?")
       .all(status, limit) as GraphRow[];
     const stepStmt = this.db.prepare(
-      "SELECT * FROM agent_task_steps WHERE graph_id = ? ORDER BY created_at, id",
+      "SELECT * FROM agent_task_steps WHERE graph_id = ? ORDER BY rowid",
     );
     return rows.map((g) => {
       const steps = (stepStmt.all(g.id) as StepRow[]).map(rowToStep);

@@ -15,11 +15,11 @@ vars: {
 
 title: |md
 # Strand — agent harness
-provider-agnostic LLM · BYOK + OAuth · agentic tool loop · desktop/computer use · typestate policy gate · brainctl memory
+provider-agnostic LLM · BYOK + OAuth · plan runner + multi-agent spawn · agentic tool loop · computer use · typestate policy gate · brainctl memory
 | {
   near: top-center
   shape: text
-  style.font-size: 20
+  style.font-size: 18
   style.bold: true
 }
 
@@ -152,6 +152,64 @@ strand: strand process {
     style.fill: "#1e293b"
     style.stroke: "#38bdf8"
     style.font-color: "#dbeafe"
+  }
+
+  plan_runner: |md
+    ## runPlan + spawn
+    `src/agent/plan-runner.ts`
+    `src/agent/spawn.ts`
+
+    LLM decomposes goal → 2–5 PlanSteps
+    per step: scoped registry + forked budget
+    → runAgenticLoop → reflection gate
+    → retry once if not achieved
+    persistent TaskGraph via SqliteTaskGraphStore
+    (agents resume across process restarts)
+
+    **spawn({ parent, goal, allowedTools, budget })**
+    child gets narrowed tools + forked budget;
+    child spend propagates to parent's ledger;
+    maxDepth enforced (default 3)
+  | {
+    shape: rectangle
+    style.fill: "#1e293b"
+    style.stroke: "#c084fc"
+    style.font-color: "#ede9fe"
+  }
+
+  tools: |md
+    ## built-in tools
+    `src/agent/tools/`
+
+    fs_read · fs_write · fs_search
+    shell_bash (via ComputerExecutor)
+    http_fetch (SSRF-guarded)
+    git_status · git_diff · git_log · git_branch · git_commit
+    brain_memory_search · brain_entity_get
+
+    each Tool has: name · description · JSON-schema
+    params · sideEffects · requiresLive · gate() · execute()
+  | {
+    shape: rectangle
+    style.fill: "#1e293b"
+    style.stroke: "#14b8a6"
+    style.font-color: "#ccfbf1"
+  }
+
+  budget: |md
+    ## Budget
+    `src/agent/budget.ts`
+
+    caps: usdTicks · tokens · wallClockMs · toolCalls
+    check() before spend · consumeUsage() after chat
+    consumeToolCall() per tool invocation
+    fork() → linked child budget (spend propagates up)
+    BudgetExceededError on breach with snapshot + reason
+  | {
+    shape: rectangle
+    style.fill: "#1e293b"
+    style.stroke: "#f59e0b"
+    style.font-color: "#fef3c7"
   }
 
   executor: |md
@@ -303,7 +361,11 @@ strand: strand process {
   factory -> consolidator: "await llm() + hasBatch()" { style.stroke: "#a78bfa" }
   factory -> agent_loop: "provider.chat()" { style.stroke: "#a78bfa"; style.stroke-dash: 3 }
   agent_loop -> executor: "dispatch computer_use" { style.stroke: "#fbbf24" }
-  reasoner -> agent_loop: "(opt-in for\\nfunction-tool loops)" { style.stroke: "#64748b"; style.stroke-dash: 4 }
+  reasoner -> agent_loop: "drives via runAgenticLoop" { style.stroke: "#a78bfa" }
+  plan_runner -> agent_loop: "per-step loop" { style.stroke: "#c084fc" }
+  plan_runner -> budget: "check · consume · fork" { style.stroke: "#f59e0b" }
+  plan_runner -> tools: "scoped registry" { style.stroke: "#14b8a6" }
+  plan_runner -> sqlite: "TaskGraph · steps · invocations" { style.stroke: "#14b8a6"; style.stroke-dash: 3 }
   perceiver -> sqlite: "INSERT perceived_events"
   sqlite -> reasoner: "SELECT last 50 events" { style.stroke-dash: 3 }
   reasoner -> gate: "CandidateEnvelope[]" { style.stroke: "#a78bfa"; style.stroke-width: 2 }
@@ -345,12 +407,19 @@ status: Phase status {
        + concurrency lock; X strategy preregistered
     • `pnpm keys` CLI (list/get/set/delete/refresh-oauth)
     • `runAgenticLoop` — local tool-call iteration runner
+    • **runPlan + spawn** — LLM decomposition, per-step
+       agentic loop, reflection gate + retry, multi-agent
+       child contexts with scoped budgets + tools
+    • **Budget** tracker with linked fork propagation
+    • **ToolRegistry** + **built-in tools**: fs · shell · http
+       · git · brainctl wrappers
+    • **Persistent TaskGraph**: SqliteTaskGraphStore +
+       resumeTaskGraph across restarts
     • computer-use tool type + Anthropic native mapping
     • `NoopExecutor` + real `DockerExecutor`
     • consolidator: file batch · inline batch · sync fallback
     • consolidatorPoll wired (30 min)
-    • multi-turn message history native on xAI
-    • 194 tests · smoke 376 ms · typecheck+biome clean
+    • 280 tests · smoke 311 ms · typecheck+biome clean
   | {
     shape: rectangle
     style.fill: "#064e3b"
