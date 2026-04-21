@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { env } from "@/config";
 import { log } from "@/util/log";
+import { prefilterComposerText } from "@/util/prefilter";
 import OpenAI, { toFile } from "openai";
 import { z } from "zod";
 
@@ -540,3 +543,191 @@ function* parseJsonlLines(text: string): Iterable<GrokBatchLine> {
 export const CandidateBatchSchema = z.object({
   candidates: z.array(z.record(z.string(), z.unknown())).default([]),
 });
+
+// ─── Composer helper (single-stage; Phase 4+ opt-in wiring) ──
+// NOTE: This is a standalone utility, NOT wired into Reasoner → Actor.
+// BUILD_AGENT_BRIEF ships single-stage only for Phase 0–3. Two-stage
+// composition would double token cost; this helper exists as a library +
+// test surface for the opt-in `config.composer.twoStage` Phase 4+ path.
+
+export type GrokComposeKind = "post" | "reply" | "quote" | "dm";
+
+export interface GrokComposeInput {
+  kind: GrokComposeKind;
+  /** Caller-provided JSON-serialised target context (parent tweet, memory, etc.). */
+  contextJson: string;
+  /** Hash of persona.md as loaded at boot. Logged for prompt versioning. */
+  personaHash: string;
+  /** Hash of policies.yaml as loaded at boot. Logged for prompt versioning. */
+  policiesHash: string;
+  temperature?: number;
+  /** Max character length for the returned text. Posts/replies/quotes 280, DM 10000. */
+  maxChars?: number;
+}
+
+export interface GrokComposeResult {
+  ok: boolean;
+  text?: string;
+  /** Populated when ok=false. Tags: prefilter:, postfilter:, length_exceeded, prompt_missing. */
+  rejectionReason?: string;
+  usage?: GrokCallOutput["usage"];
+  responseId?: string;
+}
+
+const COMPOSER_PROMPT_CACHE: Record<GrokComposeKind, string | null> = {
+  post: null,
+  reply: null,
+  quote: null,
+  dm: null,
+};
+
+function loadComposerPrompt(kind: GrokComposeKind): string {
+  const cached = COMPOSER_PROMPT_CACHE[kind];
+  if (cached !== null) return cached;
+  const path = resolve(process.cwd(), `prompts/composer-${kind}.system.md`);
+  const body = readFileSync(path, "utf8");
+  COMPOSER_PROMPT_CACHE[kind] = body;
+  return body;
+}
+
+let _personaPromptCache: string | null = null;
+function loadPersonaPrompt(): string {
+  if (_personaPromptCache !== null) return _personaPromptCache;
+  const body = readFileSync(resolve(process.cwd(), "prompts/persona.md"), "utf8");
+  _personaPromptCache = body;
+  return body;
+}
+
+function defaultMaxChars(kind: GrokComposeKind): number {
+  return kind === "dm" ? 10000 : 280;
+}
+
+function defaultMaxOutputTokens(kind: GrokComposeKind): number {
+  // ~4 chars/token heuristic. DM needs ~2500–3300 tokens; posts/replies/quotes
+  // fit easily in 400. Give the model headroom so it can self-correct length.
+  return kind === "dm" ? 4000 : 400;
+}
+
+/**
+ * Single-stage composer helper. Prefilters input context AND model output
+ * against the banned-exemplar corpus. The pre-call prefilter avoids xAI's
+ * $0.05/request refusal tax; the post-call prefilter catches model output
+ * that would trip X's spam classifier.
+ */
+export async function grokCompose(input: GrokComposeInput): Promise<GrokComposeResult> {
+  const maxChars = input.maxChars ?? defaultMaxChars(input.kind);
+
+  const pre = await prefilterComposerText(input.contextJson);
+  if (!pre.ok) {
+    log.info(
+      { svc: "grok", op: "compose", kind: input.kind, stage: "prefilter", reasons: pre.reasons },
+      "grok.compose.rejected",
+    );
+    return { ok: false, rejectionReason: `prefilter:${pre.reasons.join(",")}` };
+  }
+
+  let composerPrompt: string;
+  let personaPrompt: string;
+  try {
+    composerPrompt = loadComposerPrompt(input.kind);
+    personaPrompt = loadPersonaPrompt();
+  } catch (err) {
+    log.error(
+      {
+        svc: "grok",
+        op: "compose",
+        kind: input.kind,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      "grok.compose.prompt_missing",
+    );
+    return {
+      ok: false,
+      rejectionReason: `prompt_missing:${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  const result = await grokCall({
+    model: env.GROK_MODEL_COMPOSER,
+    systemPrompts: [personaPrompt, composerPrompt],
+    userInput: input.contextJson,
+    temperature: input.temperature ?? 0.6,
+    maxOutputTokens: defaultMaxOutputTokens(input.kind),
+    promptCacheKey: `strand:composer:${input.kind}:v1`,
+  });
+
+  log.info(
+    {
+      svc: "grok",
+      op: "compose",
+      kind: input.kind,
+      response_id: result.responseId,
+      persona_hash: input.personaHash,
+      policies_hash: input.policiesHash,
+      usage: result.usage,
+    },
+    "grok.compose.done",
+  );
+
+  const text = result.outputText.trim();
+
+  const post = await prefilterComposerText(text);
+  if (!post.ok) {
+    log.warn(
+      {
+        svc: "grok",
+        op: "compose",
+        kind: input.kind,
+        stage: "postfilter",
+        reasons: post.reasons,
+        response_id: result.responseId,
+        usage: result.usage,
+      },
+      "grok.compose.postfilter_rejected",
+    );
+    return {
+      ok: false,
+      rejectionReason: `postfilter:${post.reasons.join(",")}`,
+      usage: result.usage,
+      responseId: result.responseId,
+    };
+  }
+
+  if (text.length > maxChars) {
+    log.warn(
+      {
+        svc: "grok",
+        op: "compose",
+        kind: input.kind,
+        stage: "length",
+        length: text.length,
+        maxChars,
+        response_id: result.responseId,
+        usage: result.usage,
+      },
+      "grok.compose.length_exceeded",
+    );
+    return {
+      ok: false,
+      rejectionReason: "length_exceeded",
+      usage: result.usage,
+      responseId: result.responseId,
+    };
+  }
+
+  return {
+    ok: true,
+    text,
+    usage: result.usage,
+    responseId: result.responseId,
+  };
+}
+
+/** Test-only: clear the composer prompt cache so fixture changes are picked up. */
+export function _resetComposerPromptCache(): void {
+  COMPOSER_PROMPT_CACHE.post = null;
+  COMPOSER_PROMPT_CACHE.reply = null;
+  COMPOSER_PROMPT_CACHE.quote = null;
+  COMPOSER_PROMPT_CACHE.dm = null;
+  _personaPromptCache = null;
+}
