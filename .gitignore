@@ -13,3 +13,4 @@ data/
 .idea/
 *.swp
 tmp/
+vitest.config.ts.timestamp-*.mjs
