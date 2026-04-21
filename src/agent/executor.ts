@@ -36,12 +36,7 @@ export interface BashResult {
 export type MouseButton = "left" | "right" | "middle";
 export type ScrollDirection = "up" | "down" | "left" | "right";
 
-export type TextEditorCommand =
-  | "view"
-  | "create"
-  | "str_replace"
-  | "insert"
-  | "undo_edit";
+export type TextEditorCommand = "view" | "create" | "str_replace" | "insert" | "undo_edit";
 
 export interface ComputerExecutor {
   /** Short name for telemetry — "noop", "docker", "host", etc. */
@@ -137,20 +132,14 @@ export class NoopExecutor implements ComputerExecutor {
   }
 
   async type(text: string): Promise<void> {
-    log.info(
-      { svc: "exec", exec: this.name, op: "type", textLength: text.length },
-      "exec.noop",
-    );
+    log.info({ svc: "exec", exec: this.name, op: "type", textLength: text.length }, "exec.noop");
   }
 
   async wait(seconds: number): Promise<void> {
     log.info({ svc: "exec", exec: this.name, op: "wait", seconds }, "exec.noop");
   }
 
-  async bash(
-    command: string,
-    _opts?: { timeoutMs?: number; cwd?: string },
-  ): Promise<BashResult> {
+  async bash(command: string, _opts?: { timeoutMs?: number; cwd?: string }): Promise<BashResult> {
     log.info({ svc: "exec", exec: this.name, op: "bash", command }, "exec.noop");
     return { stdout: "", stderr: "", exitCode: 0 };
   }
@@ -227,10 +216,7 @@ export class DockerExecutor implements ComputerExecutor {
   async wait(seconds: number): Promise<void> {
     await new Promise((r) => setTimeout(r, seconds * 1000));
   }
-  async bash(
-    _command: string,
-    _opts?: { timeoutMs?: number; cwd?: string },
-  ): Promise<BashResult> {
+  async bash(_command: string, _opts?: { timeoutMs?: number; cwd?: string }): Promise<BashResult> {
     return this.notImplemented("bash");
   }
   async textEditor(
