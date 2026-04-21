@@ -1,7 +1,7 @@
+import { runAgenticLoop } from "@/agent/loop";
 import { GROK_READ_TOOLS } from "@/clients/brain";
 import { llm } from "@/clients/llm";
 import type { LlmTool } from "@/clients/llm";
-import { runAgenticLoop } from "@/agent/loop";
 import { env, persona } from "@/config";
 import { db } from "@/db";
 import { loadPrompt } from "@/prompts";
@@ -268,10 +268,7 @@ export async function reasonerTick(): Promise<CandidateEnvelope[]> {
   // that as a hard failure: no row insert, empty return — matches the old
   // "throw on call" behavior so the run counter stays honest.
   if (loop.stopReason === "error") {
-    log.error(
-      { iterations: loop.iterations, durationMs: Date.now() - t0 },
-      "reasoner.loop_error",
-    );
+    log.error({ iterations: loop.iterations, durationMs: Date.now() - t0 }, "reasoner.loop_error");
     return [];
   }
 
