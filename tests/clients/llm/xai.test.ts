@@ -1,8 +1,9 @@
 import type { LlmTool } from "@/clients/llm/types";
 import { makeXaiProvider } from "@/clients/llm/xai";
+import { log } from "@/util/log";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * xAI adapter tests. MSW intercepts api.x.ai. Verifies that the adapter
@@ -470,6 +471,36 @@ describe("makeXaiProvider.buildBatchLine", () => {
     expect(line.body["stop"]).toBeUndefined();
     expect(line.body["reasoning_effort"]).toBeUndefined();
     expect(line.body["temperature"]).toBeUndefined();
+  });
+});
+
+describe("makeXaiProvider computer_use handling", () => {
+  it("drops computer_use tool silently with capability warn; never sent on wire", async () => {
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined as never);
+    const p = makeProvider();
+    await p.chat({
+      model: "grok-4-1-fast-non-reasoning",
+      messages: [{ role: "user", content: "drive desktop" }],
+      tools: [
+        { type: "computer_use", display: { width: 1280, height: 800 } },
+        { type: "x_search", allowed_x_handles: ["elonmusk"] },
+      ],
+    });
+
+    const body = responsesCalls[0]?.body as Record<string, unknown>;
+    const sentTools = (body["tools"] as Array<Record<string, unknown>>) ?? [];
+    expect(sentTools).toHaveLength(1);
+    expect(sentTools[0]?.["type"]).toBe("x_search");
+
+    const matched = warnSpy.mock.calls.find(
+      ([obj, msg]) =>
+        typeof msg === "string" &&
+        msg === "llm.computer_use_unsupported" &&
+        (obj as { svc?: string; tool?: string }).svc === "xai" &&
+        (obj as { svc?: string; tool?: string }).tool === "computer_use",
+    );
+    expect(matched).toBeDefined();
+    warnSpy.mockRestore();
   });
 });
 

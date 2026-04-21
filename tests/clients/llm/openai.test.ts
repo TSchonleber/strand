@@ -1,7 +1,8 @@
 import { makeOpenAiProvider } from "@/clients/llm/openai";
+import { log } from "@/util/log";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * OpenAI adapter tests. Intercepts api.openai.com with MSW and exercises:
@@ -475,6 +476,47 @@ describe("openai.buildBatchLine", () => {
     expect(line.body["temperature"]).toBeUndefined();
     expect(line.body["max_tokens"]).toBeUndefined();
     expect(line.body["max_completion_tokens"]).toBe(2048);
+  });
+});
+
+describe("openai.chat — computer_use tool dropped with warn", () => {
+  it("drops computer_use silently, logs capability warn, never sends to api", async () => {
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined as never);
+    const p = makeProvider();
+    const r = await p.chat({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: "drive desktop" }],
+      tools: [
+        {
+          type: "computer_use",
+          display: { width: 1280, height: 800 },
+        },
+        {
+          type: "function",
+          function: {
+            name: "echo",
+            description: "echo",
+            parameters: { type: "object" },
+          },
+        },
+      ],
+    });
+
+    expect(r.outputText).toBe("hello from openai");
+    const body = lastChatBody as Record<string, unknown>;
+    const tools = body["tools"] as Array<Record<string, unknown>>;
+    expect(tools).toHaveLength(1);
+    expect(tools[0]?.["type"]).toBe("function");
+
+    const matched = warnSpy.mock.calls.find(
+      ([obj, msg]) =>
+        typeof msg === "string" &&
+        msg === "llm.computer_use_unsupported" &&
+        (obj as { svc?: string; tool?: string }).svc === "openai" &&
+        (obj as { svc?: string; tool?: string }).tool === "computer_use",
+    );
+    expect(matched).toBeDefined();
+    warnSpy.mockRestore();
   });
 });
 

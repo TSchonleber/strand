@@ -4,6 +4,7 @@ import { LlmCapabilityError, type LlmProvider } from "./provider";
 import type {
   LlmCall,
   LlmCapabilities,
+  LlmComputerUseTool,
   LlmFunctionTool,
   LlmMcpTool,
   LlmResult,
@@ -114,6 +115,16 @@ interface AnthropicRequestBody {
   [k: string]: unknown;
 }
 
+const COMPUTER_USE_BETA_HEADER = "computer-use-2025-01-24";
+
+/** Whether any tool in the call will emit Anthropic computer-use native declarations. */
+export function hasComputerUseTool(input: LlmCall): boolean {
+  for (const t of input.tools ?? []) {
+    if (isComputerUseTool(t)) return true;
+  }
+  return false;
+}
+
 /** Build the Anthropic request body from the provider-agnostic LlmCall. */
 export function buildAnthropicRequest(input: LlmCall): AnthropicRequestBody {
   const systemTexts: string[] = [];
@@ -158,10 +169,12 @@ export function buildAnthropicRequest(input: LlmCall): AnthropicRequestBody {
   }
 
   // Split incoming tools: function tools → tools[], MCP tools → mcp_servers[],
+  // computer-use tools → tools[] with native 20250124 dated declarations,
   // server tools → tools[] with provider-native type translation.
   const functionTools: AnthropicToolInput[] = [];
   const serverTools: Record<string, unknown>[] = [];
   const mcpServers: Record<string, unknown>[] = [];
+  const computerUseTools: Record<string, unknown>[] = [];
 
   for (const t of input.tools ?? []) {
     if (isFunctionTool(t)) {
@@ -170,6 +183,10 @@ export function buildAnthropicRequest(input: LlmCall): AnthropicRequestBody {
         description: t.function.description,
         input_schema: t.function.parameters,
       });
+    } else if (isComputerUseTool(t)) {
+      for (const decl of buildComputerUseToolDeclarations(t)) {
+        computerUseTools.push(decl);
+      }
     } else if (isMcpTool(t)) {
       const server: Record<string, unknown> = {
         type: "url",
@@ -217,8 +234,8 @@ export function buildAnthropicRequest(input: LlmCall): AnthropicRequestBody {
     if (tc) body.tool_choice = tc;
   }
 
-  if (functionTools.length > 0 || serverTools.length > 0) {
-    body.tools = [...functionTools, ...serverTools];
+  if (functionTools.length > 0 || serverTools.length > 0 || computerUseTools.length > 0) {
+    body.tools = [...functionTools, ...computerUseTools, ...serverTools];
   }
   if (mcpServers.length > 0) {
     body.mcp_servers = mcpServers;
@@ -285,8 +302,42 @@ function isFunctionTool(t: LlmTool): t is LlmFunctionTool {
 function isMcpTool(t: LlmTool): t is LlmMcpTool {
   return (t as { type?: string }).type === "mcp";
 }
+function isComputerUseTool(t: LlmTool): t is LlmComputerUseTool {
+  return (t as { type?: string }).type === "computer_use";
+}
 function isServerTool(t: LlmTool): t is LlmServerTool {
-  return typeof (t as { type?: unknown }).type === "string" && !isFunctionTool(t) && !isMcpTool(t);
+  return (
+    typeof (t as { type?: unknown }).type === "string" &&
+    !isFunctionTool(t) &&
+    !isMcpTool(t) &&
+    !isComputerUseTool(t)
+  );
+}
+
+/**
+ * Translate a single `computer_use` LlmTool into one or more Anthropic dated
+ * native-tool declarations. Defaults to all three (computer + bash +
+ * text_editor) when `enabledTools` is omitted.
+ */
+function buildComputerUseToolDeclarations(t: LlmComputerUseTool): Record<string, unknown>[] {
+  const enabled = t.enabledTools ?? ["computer", "bash", "text_editor"];
+  const out: Record<string, unknown>[] = [];
+  for (const kind of enabled) {
+    if (kind === "computer") {
+      out.push({
+        type: "computer_20250124",
+        name: "computer",
+        display_width_px: t.display.width,
+        display_height_px: t.display.height,
+        display_number: t.display.displayNumber ?? 1,
+      });
+    } else if (kind === "bash") {
+      out.push({ type: "bash_20250124", name: "bash" });
+    } else if (kind === "text_editor") {
+      out.push({ type: "text_editor_20250124", name: "str_replace_editor" });
+    }
+  }
+  return out;
 }
 function stripType<T extends { type: string }>(t: T): Omit<T, "type"> {
   const { type: _discard, ...rest } = t;
@@ -366,9 +417,18 @@ export function makeAnthropicProvider(opts: AnthropicProviderOptions): LlmProvid
     const req = buildAnthropicRequest(input);
     const t0 = Date.now();
 
+    // Opt into computer-use beta per-call when the caller asked for it. The
+    // SDK accepts headers as part of RequestOptions (second arg); we keep the
+    // header conditional so non-computer-use calls aren't tagged with a beta
+    // opt-in they don't need.
+    const options = hasComputerUseTool(input)
+      ? { headers: { "anthropic-beta": COMPUTER_USE_BETA_HEADER } }
+      : undefined;
+
     // SDK types lag — our boundary types are already strict, so cast here.
-    const resp = (await (client.messages.create as (r: unknown) => Promise<unknown>)(
+    const resp = (await (client.messages.create as (r: unknown, o?: unknown) => Promise<unknown>)(
       req,
+      options,
     )) as AnthropicResponse;
 
     const responseId = String(resp.id ?? "");

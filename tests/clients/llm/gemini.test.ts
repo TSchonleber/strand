@@ -1,4 +1,5 @@
 import type { LlmCall } from "@/clients/llm/types";
+import { log } from "@/util/log";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -276,6 +277,35 @@ describe("gemini adapter", () => {
       computerUse: false,
       maxContextTokens: 2_000_000,
     });
+  });
+
+  it("drops computer_use tool silently with capability warn; never forwarded to SDK", async () => {
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined as never);
+    generateContentMock.mockResolvedValueOnce(textResp("ok"));
+    const provider = makeGeminiProvider({ apiKey: "k" });
+
+    await provider.chat(
+      baseCall({
+        tools: [
+          { type: "computer_use", display: { width: 1280, height: 800 } },
+          { type: "google_search" },
+        ],
+      }),
+    );
+
+    const req = generateContentMock.mock.calls[0]?.[0];
+    const toolsField = req.config.tools as unknown[] | undefined;
+    expect(toolsField).toEqual([{ googleSearch: {} }]);
+
+    const matched = warnSpy.mock.calls.find(
+      ([obj, msg]) =>
+        typeof msg === "string" &&
+        msg === "llm.computer_use_unsupported" &&
+        (obj as { svc?: string; tool?: string }).svc === "gemini" &&
+        (obj as { svc?: string; tool?: string }).tool === "computer_use",
+    );
+    expect(matched).toBeDefined();
+    warnSpy.mockRestore();
   });
 
   it("does not expose batch methods", () => {
