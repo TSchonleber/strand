@@ -1,12 +1,17 @@
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { URL } from "node:url";
+import { credentials } from "@/auth";
 import { env } from "@/config";
 import { TwitterApi } from "twitter-api-v2";
 
 /**
- * One-shot OAuth 2.0 PKCE flow. Captures access + refresh tokens and
- * writes them into the local .env. Re-run whenever scopes change.
+ * One-shot OAuth 2.0 PKCE flow for X. Captures access + refresh tokens and
+ * writes them into the configured credential store (env by default; file when
+ * `STRAND_CREDENTIAL_STORE=file`). Re-run whenever scopes change.
+ *
+ * The store's `setMany()` is atomic — access + refresh + expiry land together
+ * or not at all. Losing the rotated refresh token after the access succeeds
+ * would otherwise lock the account out.
  */
 
 const SCOPES = [
@@ -25,12 +30,21 @@ const SCOPES = [
 ];
 
 async function main(): Promise<void> {
-  const oauth = new TwitterApi({
-    clientId: env.X_CLIENT_ID,
-    clientSecret: env.X_CLIENT_SECRET,
-  });
+  const store = credentials();
+  const clientId = (await store.get("X_CLIENT_ID")) ?? env.X_CLIENT_ID;
+  const clientSecret = (await store.get("X_CLIENT_SECRET")) ?? env.X_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    process.stdout.write(
+      "X_CLIENT_ID / X_CLIENT_SECRET missing from credential store AND .env — " +
+        "set one of them before running `pnpm oauth:setup`.\n",
+    );
+    process.exit(2);
+  }
 
-  const { url, codeVerifier, state } = oauth.generateOAuth2AuthLink(env.X_OAUTH_REDIRECT_URI, {
+  const oauth = new TwitterApi({ clientId, clientSecret });
+  const redirectUri = env.X_OAUTH_REDIRECT_URI;
+
+  const { url, codeVerifier, state } = oauth.generateOAuth2AuthLink(redirectUri, {
     scope: SCOPES,
   });
 
@@ -38,9 +52,9 @@ async function main(): Promise<void> {
     `\nOpen this URL in a browser logged in as the Strand account:\n\n${url}\n\n`,
   );
 
-  const port = Number(new URL(env.X_OAUTH_REDIRECT_URI).port || "4567");
+  const port = Number(new URL(redirectUri).port || "4567");
   const server = createServer(async (req, res) => {
-    const reqUrl = new URL(req.url ?? "/", env.X_OAUTH_REDIRECT_URI);
+    const reqUrl = new URL(req.url ?? "/", redirectUri);
     const code = reqUrl.searchParams.get("code");
     const rState = reqUrl.searchParams.get("state");
     if (!code || rState !== state) {
@@ -48,29 +62,30 @@ async function main(): Promise<void> {
       return;
     }
     try {
-      const {
-        client: _c,
-        accessToken,
-        refreshToken,
-        expiresIn,
-      } = await oauth.loginWithOAuth2({
+      const { accessToken, refreshToken, expiresIn } = await oauth.loginWithOAuth2({
         code,
         codeVerifier,
-        redirectUri: env.X_OAUTH_REDIRECT_URI,
+        redirectUri,
       });
 
       const me = await new TwitterApi(accessToken).v2.me();
 
-      upsertEnv({
+      const updates: Record<string, string> = {
         X_USER_ID: me.data.id,
         X_USER_ACCESS_TOKEN: accessToken,
-        ...(refreshToken ? { X_USER_REFRESH_TOKEN: refreshToken } : {}),
         X_USER_TOKEN_EXPIRES_AT: new Date(Date.now() + expiresIn * 1000).toISOString(),
-      });
+      };
+      if (refreshToken) updates["X_USER_REFRESH_TOKEN"] = refreshToken;
+
+      if (store.setMany) {
+        await store.setMany(updates);
+      } else {
+        for (const [k, v] of Object.entries(updates)) await store.set(k, v);
+      }
 
       res.writeHead(200).end(`ok — captured tokens for @${me.data.username}`);
       process.stdout.write(`\ncaptured tokens for @${me.data.username} (id=${me.data.id})\n`);
-      process.stdout.write("tokens written to .env\n");
+      process.stdout.write(`tokens written to credential store: ${store.name}\n`);
       setTimeout(() => process.exit(0), 500);
     } catch (err) {
       res.writeHead(500).end(`error: ${String(err)}`);
@@ -80,24 +95,8 @@ async function main(): Promise<void> {
   });
 
   server.listen(port, () => {
-    process.stdout.write(`waiting for callback on ${env.X_OAUTH_REDIRECT_URI} ...\n`);
+    process.stdout.write(`waiting for callback on ${redirectUri} ...\n`);
   });
-}
-
-function upsertEnv(updates: Record<string, string>): void {
-  const path = ".env";
-  const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
-  const lines = existing.split("\n");
-  const keys = new Set(Object.keys(updates));
-  const out: string[] = [];
-  for (const line of lines) {
-    const m = line.match(/^([A-Z0-9_]+)=/);
-    if (m && keys.has(m[1] ?? "")) continue;
-    out.push(line);
-  }
-  for (const [k, v] of Object.entries(updates)) out.push(`${k}=${v}`);
-  writeFileSync(path, out.join("\n"));
-  appendFileSync(path, "");
 }
 
 void main();

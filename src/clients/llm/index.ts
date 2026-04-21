@@ -1,3 +1,5 @@
+import { MissingCredentialError, credentials } from "@/auth";
+import type { CredentialStore } from "@/auth";
 import { env } from "@/config";
 import { log } from "@/util/log";
 import { makeAnthropicProvider } from "./anthropic";
@@ -7,61 +9,80 @@ import { LlmCapabilityError, type LlmProvider } from "./provider";
 import { makeXaiProvider } from "./xai";
 
 /**
- * Provider factory. Selected by `env.LLM_PROVIDER`.
+ * LLM provider factory.
  *
- * Credentials come from the per-provider env vars (XAI_API_KEY,
- * OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY). The factory validates
- * that the selected provider's key is set and throws a clear error if not.
+ * Provider selection: `env.LLM_PROVIDER` (xai | openai | anthropic | gemini).
+ * Credentials: resolved lazily from a pluggable `CredentialStore`. Default
+ * store is constructed via `credentials()` — selects between env / file /
+ * env+file based on `STRAND_CREDENTIAL_STORE`.
  *
- * Singleton — constructed lazily on first call, reused thereafter. Call
- * `_resetLlmForTests()` in tests to force re-construction.
+ * Bring-your-own-key:
+ *   - Default: `llm()` reads keys from the default store (env-backed).
+ *   - Override: `llm({ credentials: myStore })` — plug in a FileStore,
+ *     OAuthStore, or a custom backend. The returned provider resolves its
+ *     API key from the store at construction and caches it for the lifetime
+ *     of the provider instance.
+ *   - Reconstruct: `_resetLlmForTests()` clears the singleton; next call to
+ *     `llm(opts)` rebuilds with new credentials.
  */
 
 let _provider: LlmProvider | null = null;
 
-export function llm(): LlmProvider {
+export interface LlmFactoryOpts {
+  /** Override the default credential store (BYOK). */
+  credentials?: CredentialStore;
+}
+
+export async function llm(opts?: LlmFactoryOpts): Promise<LlmProvider> {
   if (_provider) return _provider;
-  _provider = construct();
+  const store = opts?.credentials ?? credentials();
+  _provider = await construct(store);
   log.info(
     {
       svc: "llm",
       provider: _provider.name,
       capabilities: _provider.capabilities,
+      credential_store: store.name,
     },
     "llm.initialized",
   );
   return _provider;
 }
 
-function construct(): LlmProvider {
+async function construct(store: CredentialStore): Promise<LlmProvider> {
   switch (env.LLM_PROVIDER) {
     case "xai": {
-      if (!env.XAI_API_KEY) throw new Error("LLM_PROVIDER=xai requires XAI_API_KEY");
-      return makeXaiProvider({ apiKey: env.XAI_API_KEY, baseURL: env.XAI_BASE_URL });
+      const apiKey = await store.get("XAI_API_KEY");
+      if (!apiKey) throw new MissingCredentialError("XAI_API_KEY", store.name);
+      return makeXaiProvider({ apiKey, baseURL: env.XAI_BASE_URL });
     }
     case "openai": {
-      if (!env.OPENAI_API_KEY) throw new Error("LLM_PROVIDER=openai requires OPENAI_API_KEY");
+      const apiKey = await store.get("OPENAI_API_KEY");
+      if (!apiKey) throw new MissingCredentialError("OPENAI_API_KEY", store.name);
+      const baseURL = (await store.get("OPENAI_BASE_URL")) ?? env.OPENAI_BASE_URL;
       return makeOpenAiProvider({
-        apiKey: env.OPENAI_API_KEY,
-        ...(env.OPENAI_BASE_URL ? { baseURL: env.OPENAI_BASE_URL } : {}),
+        apiKey,
+        ...(baseURL ? { baseURL } : {}),
       });
     }
     case "anthropic": {
-      if (!env.ANTHROPIC_API_KEY)
-        throw new Error("LLM_PROVIDER=anthropic requires ANTHROPIC_API_KEY");
+      const apiKey = await store.get("ANTHROPIC_API_KEY");
+      if (!apiKey) throw new MissingCredentialError("ANTHROPIC_API_KEY", store.name);
+      const baseURL = (await store.get("ANTHROPIC_BASE_URL")) ?? env.ANTHROPIC_BASE_URL;
       return makeAnthropicProvider({
-        apiKey: env.ANTHROPIC_API_KEY,
-        ...(env.ANTHROPIC_BASE_URL ? { baseURL: env.ANTHROPIC_BASE_URL } : {}),
+        apiKey,
+        ...(baseURL ? { baseURL } : {}),
       });
     }
     case "gemini": {
-      if (!env.GEMINI_API_KEY) throw new Error("LLM_PROVIDER=gemini requires GEMINI_API_KEY");
-      return makeGeminiProvider({ apiKey: env.GEMINI_API_KEY });
+      const apiKey = await store.get("GEMINI_API_KEY");
+      if (!apiKey) throw new MissingCredentialError("GEMINI_API_KEY", store.name);
+      return makeGeminiProvider({ apiKey });
     }
   }
 }
 
-/** Test helper — clears the singleton so a new LLM_PROVIDER takes effect. */
+/** Test helper — clears the singleton so a new LLM_PROVIDER or store takes effect. */
 export function _resetLlmForTests(): void {
   _provider = null;
 }

@@ -83,7 +83,7 @@ async function main(): Promise<void> {
     "ingest.cost_estimate",
   );
 
-  const client = userClient();
+  const client = await userClient();
   const userId = env.X_USER_ID;
 
   let fetchedUsers = 0;

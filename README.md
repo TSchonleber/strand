@@ -19,13 +19,41 @@ See `docs/ARCHITECTURE.md` for the full technical map (7 Mermaid diagrams, schem
 
 ```bash
 cp .env.example .env
-# Fill in XAI_API_KEY, X_CLIENT_ID, X_CLIENT_SECRET from Apple Notes
-
 pnpm install
-pnpm oauth:setup              # capture user OAuth refresh token
+
+# Pick ONE credential source:
+#   (a) edit .env directly — quickest, works with STRAND_CREDENTIAL_STORE=env (default)
+#   (b) use the pluggable file store — keys never touch .env:
+#       export STRAND_CREDENTIAL_STORE=file
+#       pnpm keys set XAI_API_KEY
+#       pnpm keys set X_CLIENT_ID
+#       pnpm keys set X_CLIENT_SECRET
+#       pnpm keys list
+# Under `file` mode, credentials persist to ~/.strand/credentials.json (0600).
+
+pnpm oauth:setup              # X OAuth 2.0 PKCE → atomic token store write
 pnpm memory:bootstrap         # seed brainctl with persona + policies
 pnpm dev                      # boot orchestrator in shadow mode
 ```
+
+### Bring-your-own-key (BYOK)
+
+Strand resolves every credential through `src/auth/` — a pluggable `CredentialStore`. Pick your backend:
+
+- **`env`** (default) — process env, matches historical behavior
+- **`file`** — `~/.strand/credentials.json`, 0600 perms, atomic writes
+- **`file+env`** — file overrides env (useful for local overrides without touching `.env`)
+- **OAuth decorator** — wraps any base store, transparently refreshes provider tokens on access. X OAuth 2.0 PKCE is preregistered; `store.get("X_USER_ACCESS_TOKEN")` auto-refreshes within 60 s of expiry with atomic rotation of access + refresh + expiry.
+
+```bash
+pnpm keys list                              # what's in the store
+pnpm keys set OPENAI_API_KEY sk-…            # write
+pnpm keys get OPENAI_API_KEY                 # read (echoed in cleartext)
+pnpm keys delete OPENAI_API_KEY              # remove
+pnpm keys refresh-oauth X_USER_ACCESS_TOKEN  # force OAuth refresh now
+```
+
+To plug a custom backend (Keychain, 1Password, HashiCorp Vault, database per tenant): implement `CredentialStore` and pass it into `llm({ credentials })`.
 
 ## Modes
 

@@ -18,6 +18,7 @@
     "lint": "biome check .",
     "fmt": "biome format --write .",
     "oauth:setup": "tsx scripts/oauth-setup.ts",
+    "keys": "tsx scripts/keys.ts",
     "memory:bootstrap": "tsx scripts/bootstrap-memory.ts",
     "shadow:replay": "tsx scripts/replay-shadow.ts",
     "smoke:shadow": "tsx scripts/smoke-shadow.ts",

@@ -15,11 +15,11 @@ vars: {
 
 title: |md
 # Strand — agent harness
-provider-agnostic LLM · agentic tool loop · desktop/computer use · typestate policy gate · brainctl memory
+provider-agnostic LLM · BYOK + OAuth · agentic tool loop · desktop/computer use · typestate policy gate · brainctl memory
 | {
   near: top-center
   shape: text
-  style.font-size: 22
+  style.font-size: 20
   style.bold: true
 }
 
@@ -96,13 +96,35 @@ strand: strand process {
   style.stroke-width: 2
   tooltip: "src/orchestrator.ts — in-process intervals (dev) · migrate to a queue when prod needs it"
 
+  auth: |md
+    ## auth (BYOK)
+    `src/auth/`
+
+    **CredentialStore** — pluggable resolver
+    EnvCredentialStore (default)
+    FileCredentialStore (~/.strand/creds.json, 0600)
+    ChainedCredentialStore (file+env)
+    OAuthCredentialStore (decorator)
+      · auto-refresh within 60 s window
+      · atomic rotation via setMany()
+      · per-provider concurrency lock
+      · X strategy preregistered
+    `pnpm keys {list,get,set,delete,refresh-oauth}`
+  | {
+    shape: rectangle
+    style.fill: "#1e293b"
+    style.stroke: "#10b981"
+    style.font-color: "#d1fae5"
+  }
+
   factory: |md
     ## llm() factory
     `src/clients/llm/index.ts`
 
-    singleton switch on `LLM_PROVIDER`
-    validates per-provider API key
-    logs capabilities at boot
+    async singleton · switch on `LLM_PROVIDER`
+    resolves keys from CredentialStore
+    `llm({ credentials: myStore })` for BYOK
+    logs capabilities + store name at boot
     tests: `_resetLlmForTests()`
   | {
     shape: rectangle
@@ -273,8 +295,9 @@ strand: strand process {
   }
 
   # intra edges
-  factory -> reasoner: "llm()" { style.stroke: "#a78bfa" }
-  factory -> consolidator: "llm() + hasBatch()" { style.stroke: "#a78bfa" }
+  auth -> factory: "credentials()" { style.stroke: "#10b981"; style.stroke-width: 2 }
+  factory -> reasoner: "await llm()" { style.stroke: "#a78bfa" }
+  factory -> consolidator: "await llm() + hasBatch()" { style.stroke: "#a78bfa" }
   factory -> agent_loop: "provider.chat()" { style.stroke: "#a78bfa"; style.stroke-dash: 3 }
   agent_loop -> executor: "dispatch computer_use" { style.stroke: "#fbbf24" }
   reasoner -> agent_loop: "(opt-in for\\nfunction-tool loops)" { style.stroke: "#64748b"; style.stroke-dash: 4 }
@@ -298,6 +321,7 @@ external.brain -> strand.reasoner: "MCP read" { style.stroke: "#10b981"; style.s
 external.brain -> strand.consolidator: "MCP read + consolidation" { style.stroke: "#10b981"; style.stroke-dash: 4 }
 strand.perceiver -> external.brain: "event_add" { style.stroke: "#10b981"; style.stroke-dash: 2 }
 strand.actor -> external.brain: "outcome_annotate" { style.stroke: "#10b981"; style.stroke-dash: 2 }
+external.x -> strand.auth: "OAuth2 PKCE refresh" { style.stroke: "#38bdf8"; style.stroke-dash: 4 }
 
 # ═════════════════════ Phase status ═════════════════════
 
@@ -311,16 +335,17 @@ status: Phase status {
     • typestate gate · reasoner via runAgenticLoop
     • 4 adapters: openai-compat · anthropic · xai · gemini
     • `llm()` factory + capabilities-driven features
+    • **BYOK credential stores**: env · file · file+env
+    • **OAuthCredentialStore** decorator — atomic refresh
+       + concurrency lock; X strategy preregistered
+    • `pnpm keys` CLI (list/get/set/delete/refresh-oauth)
     • `runAgenticLoop` — local tool-call iteration runner
     • computer-use tool type + Anthropic native mapping
     • `NoopExecutor` + real `DockerExecutor`
-       (Xvfb + xdotool + scrot via `docker exec`)
-    • consolidator: xAI/OpenAI file batch · Anthropic inline
-       batch · sync fallback (Gemini) — all through hasBatch
-       / hasInlineBatch / hasBatchPoll guards
+    • consolidator: file batch · inline batch · sync fallback
     • consolidatorPoll wired (30 min)
     • multi-turn message history native on xAI
-    • 177 tests · smoke 281 ms · typecheck+biome clean
+    • 194 tests · smoke 376 ms · typecheck+biome clean
   | {
     shape: rectangle
     style.fill: "#064e3b"

@@ -1,3 +1,5 @@
+import { credentials } from "@/auth";
+import type { CredentialStore } from "@/auth";
 import { env } from "@/config";
 import type { Action } from "@/types/actions";
 import { log } from "@/util/log";
@@ -8,63 +10,85 @@ import { TwitterApi, type TwitterApiTokens } from "twitter-api-v2";
  *
  * Read side: only for our own surface — mentions, home timeline, DMs.
  * External scouting (topic search, discovering users, pulling threads we're
- * not in) goes through Grok's server-side `x_search` tool, not here.
+ * not in) goes through the provider's server-side tools (xAI `x_search`,
+ * Anthropic `web_search`), not here.
  *
- * Write side: all writes. Every method returns a reversible handle when
- * applicable (tweetId to delete, userId to unfollow).
+ * OAuth credentials resolve through the `CredentialStore`:
+ *   - `X_USER_ACCESS_TOKEN` / `X_USER_REFRESH_TOKEN` / `X_USER_TOKEN_EXPIRES_AT`
+ *     are read/written atomically via `store.setMany()` on refresh.
+ *   - `X_CLIENT_ID` + `X_CLIENT_SECRET` are read once per refresh.
+ *
+ * By default the OAuthCredentialStore decorator handles refresh transparently:
+ *   `store.get("X_USER_ACCESS_TOKEN")` transparently refreshes if within the
+ *   60 s expiry window, and returns the fresh token. Callers just ask for the
+ *   access token — no manual `refreshUserTokenIfNeeded()` dance.
  */
 
 let _userClient: TwitterApi | null = null;
+let _cachedAccessToken: string | null = null;
 let _appClient: TwitterApi | null = null;
 
-export function userClient(): TwitterApi {
-  if (_userClient) return _userClient;
-  if (!env.X_USER_ACCESS_TOKEN) {
-    throw new Error("X_USER_ACCESS_TOKEN not set. Run `pnpm oauth:setup`.");
+/** Override the credential store for this module — used by tests + multi-tenant hosts. */
+let _storeOverride: CredentialStore | null = null;
+export function setXCredentialStore(store: CredentialStore | null): void {
+  _storeOverride = store;
+  _userClient = null;
+  _cachedAccessToken = null;
+}
+
+function store(): CredentialStore {
+  return _storeOverride ?? credentials();
+}
+
+export async function userClient(): Promise<TwitterApi> {
+  const accessToken = await store().get("X_USER_ACCESS_TOKEN");
+  if (!accessToken) {
+    throw new Error("X_USER_ACCESS_TOKEN not set in credential store. Run `pnpm oauth:setup`.");
   }
-  _userClient = new TwitterApi(env.X_USER_ACCESS_TOKEN);
+  if (_userClient && _cachedAccessToken === accessToken) return _userClient;
+  _userClient = new TwitterApi(accessToken);
+  _cachedAccessToken = accessToken;
   return _userClient;
 }
 
-export function appClient(): TwitterApi {
+export async function appClient(): Promise<TwitterApi> {
   if (_appClient) return _appClient;
-  if (!env.X_BEARER_TOKEN) {
-    throw new Error("X_BEARER_TOKEN not set");
-  }
-  _appClient = new TwitterApi(env.X_BEARER_TOKEN);
+  const bearer = await store().get("X_BEARER_TOKEN");
+  if (!bearer) throw new Error("X_BEARER_TOKEN not set in credential store");
+  _appClient = new TwitterApi(bearer);
   return _appClient;
 }
 
-// Refresh OAuth2 user token when it's within 60s of expiry.
+/**
+ * Ensure the user access token is fresh. No-op when the OAuthCredentialStore
+ * is in use (`store.get()` refreshes transparently). Kept for callers that
+ * want explicit refresh semantics.
+ */
 export async function refreshUserTokenIfNeeded(): Promise<void> {
-  const expAt = env.X_USER_TOKEN_EXPIRES_AT;
-  if (!expAt || !env.X_USER_REFRESH_TOKEN) return;
-  const expMs = Date.parse(expAt);
-  if (Number.isNaN(expMs)) return;
-  if (expMs - Date.now() > 60_000) return;
+  // Ask for the access token; the OAuth decorator's `get()` refreshes
+  // transparently if we're within the expiry window.
+  await store().get("X_USER_ACCESS_TOKEN");
+  // Invalidate the cached client if the token rotated.
+  const fresh = await store().get("X_USER_ACCESS_TOKEN");
+  if (fresh !== _cachedAccessToken) {
+    _userClient = null;
+    _cachedAccessToken = null;
+    log.info({ svc: "x" }, "x.token_refreshed");
+  }
+}
 
-  const oauth = new TwitterApi({
-    clientId: env.X_CLIENT_ID,
-    clientSecret: env.X_CLIENT_SECRET,
-  });
-  const { accessToken, refreshToken, expiresIn } = await oauth.refreshOAuth2Token(
-    env.X_USER_REFRESH_TOKEN,
-  );
-  Object.assign(process.env, {
-    X_USER_ACCESS_TOKEN: accessToken,
-    ...(refreshToken ? { X_USER_REFRESH_TOKEN: refreshToken } : {}),
-    X_USER_TOKEN_EXPIRES_AT: new Date(Date.now() + expiresIn * 1000).toISOString(),
-  });
-  _userClient = null;
-  log.info({ svc: "x" }, "x.token_refreshed");
+async function userId(): Promise<string> {
+  const v = await store().get("X_USER_ID");
+  if (!v) throw new Error("X_USER_ID not set in credential store");
+  return v;
 }
 
 // ─── READ: our own surface ───────────────────────────────────
 
 export async function fetchMentions(opts: { sinceId?: string; max?: number } = {}) {
-  await refreshUserTokenIfNeeded();
-  if (!env.X_USER_ID) throw new Error("X_USER_ID not set");
-  const res = await userClient().v2.userMentionTimeline(env.X_USER_ID, {
+  const client = await userClient();
+  const id = await userId();
+  const res = await client.v2.userMentionTimeline(id, {
     max_results: opts.max ?? 50,
     ...(opts.sinceId ? { since_id: opts.sinceId } : {}),
     "tweet.fields": ["author_id", "created_at", "conversation_id", "in_reply_to_user_id"],
@@ -73,18 +97,18 @@ export async function fetchMentions(opts: { sinceId?: string; max?: number } = {
 }
 
 export async function fetchHomeTimeline(opts: { sinceId?: string; max?: number } = {}) {
-  await refreshUserTokenIfNeeded();
-  if (!env.X_USER_ID) throw new Error("X_USER_ID not set");
-  const res = await userClient().v2.homeTimeline({
+  const client = await userClient();
+  const id = await userId();
+  const res = await client.v2.homeTimeline({
     max_results: opts.max ?? 50,
     ...(opts.sinceId ? { since_id: opts.sinceId } : {}),
     "tweet.fields": ["author_id", "created_at", "public_metrics"],
   });
+  void id; // not used by homeTimeline but we validate early
   return res.data.data ?? [];
 }
 
 export async function fetchDmEvents(opts: { sinceId?: string; max?: number } = {}) {
-  await refreshUserTokenIfNeeded();
   // v2 DM endpoints vary across tiers; wire exactly per your tier's reference.
   // Stub returns [] until DMs are in scope per the phase plan.
   log.debug({ opts }, "x.fetchDmEvents.stub");
@@ -98,11 +122,6 @@ export interface WriteResult {
   reversible: boolean;
 }
 
-async function withRefresh<T>(fn: () => Promise<T>): Promise<T> {
-  await refreshUserTokenIfNeeded();
-  return fn();
-}
-
 export async function execute(action: Action): Promise<WriteResult> {
   if (action.kind === "project_proposal") {
     throw new Error(
@@ -110,27 +129,29 @@ export async function execute(action: Action): Promise<WriteResult> {
     );
   }
   const t0 = Date.now();
-  const result = await withRefresh(async () => {
-    const c = userClient();
+  const c = await userClient();
+
+  const result: WriteResult = await (async () => {
     switch (action.kind) {
       case "like": {
-        if (!env.X_USER_ID) throw new Error("X_USER_ID not set");
-        await c.v2.like(env.X_USER_ID, action.tweetId);
+        const id = await userId();
+        await c.v2.like(id, action.tweetId);
         return { xObjectId: action.tweetId, reversible: true };
       }
       case "bookmark": {
-        if (!env.X_USER_ID) throw new Error("X_USER_ID not set");
+        const id = await userId();
         await c.v2.bookmark(action.tweetId);
+        void id;
         return { xObjectId: action.tweetId, reversible: true };
       }
       case "follow": {
-        if (!env.X_USER_ID) throw new Error("X_USER_ID not set");
-        await c.v2.follow(env.X_USER_ID, action.userId);
+        const id = await userId();
+        await c.v2.follow(id, action.userId);
         return { xObjectId: action.userId, reversible: true };
       }
       case "unfollow": {
-        if (!env.X_USER_ID) throw new Error("X_USER_ID not set");
-        await c.v2.unfollow(env.X_USER_ID, action.userId);
+        const id = await userId();
+        await c.v2.unfollow(id, action.userId);
         return { xObjectId: action.userId, reversible: false };
       }
       case "post": {
@@ -160,7 +181,7 @@ export async function execute(action: Action): Promise<WriteResult> {
         throw new Error(`Unhandled action kind: ${JSON.stringify(_exhaustive)}`);
       }
     }
-  });
+  })();
 
   log.info(
     { svc: "x", kind: action.kind, xObjectId: result.xObjectId, durationMs: Date.now() - t0 },
@@ -170,9 +191,12 @@ export async function execute(action: Action): Promise<WriteResult> {
 }
 
 export async function deleteTweet(tweetId: string): Promise<void> {
-  await withRefresh(() => userClient().v2.deleteTweet(tweetId));
+  const c = await userClient();
+  await c.v2.deleteTweet(tweetId);
 }
 
 export function whoAmI(): TwitterApiTokens | null {
-  return null; // placeholder for debug CLI
+  // env.* retained only for legacy callers; prefer store().get() in new code.
+  void env;
+  return null;
 }

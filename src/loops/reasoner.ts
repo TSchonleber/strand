@@ -188,7 +188,7 @@ export async function reasonerTick(): Promise<CandidateEnvelope[]> {
   const personaPrompt = loadPrompt("persona");
   const reasonerPrompt = loadPrompt("reasoner.system");
 
-  const provider = llm();
+  const provider = await llm();
 
   // Tools: provider-native server-side tools + MCP. Adapters drop what they
   // don't support (e.g., OpenAI Chat Completions drops x_search; Gemini drops mcp).

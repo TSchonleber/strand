@@ -154,7 +154,7 @@ export async function consolidatorRun(): Promise<void> {
 export async function consolidatorRunWithResult(): Promise<ConsolidatorRunResult> {
   const t0 = Date.now();
   const runId = randomUUID();
-  const provider = llm();
+  const provider = await llm();
 
   // Inline batch (Anthropic) — no file upload. Try this first; adapters that
   // support it get a single round-trip to /v1/messages/batches.
@@ -315,7 +315,7 @@ export async function consolidatorPoll(): Promise<void> {
     return;
   }
 
-  const provider = llm();
+  const provider = await llm();
   if (!hasBatchPoll(provider)) {
     log.warn(
       { provider: provider.name, openRows: openRows.length },
@@ -399,7 +399,7 @@ async function aggregateResults(batchId: string): Promise<AggregatedSummary> {
     failed_tasks: [],
   };
 
-  const provider = llm();
+  const provider = await llm();
   if (!hasBatchPoll(provider)) {
     out.failed_tasks.push(`${batchId}: provider ${provider.name} has no batch results path`);
     return out;
