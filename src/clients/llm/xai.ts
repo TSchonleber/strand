@@ -4,6 +4,7 @@ import {
   type GrokCallOutput,
   type GrokInclude,
   type GrokTool,
+  buildResponsesBody,
   grokBatchCreate,
   grokBatchGet,
   grokBatchResults,
@@ -15,6 +16,7 @@ import type { LlmProvider } from "./provider";
 import type {
   LlmBatchCreateArgs,
   LlmBatchHandle,
+  LlmBatchRequestLine,
   LlmBatchResultLine,
   LlmCall,
   LlmCapabilities,
@@ -235,6 +237,15 @@ export function makeXaiProvider(opts: { apiKey: string; baseURL?: string }): Llm
         if (line.error !== undefined) out.error = line.error;
         return out;
       });
+    },
+
+    buildBatchLine(call: LlmCall, customId: string): LlmBatchRequestLine {
+      return {
+        custom_id: customId,
+        method: "POST",
+        url: "/v1/responses",
+        body: buildResponsesBody(translateCall(call)),
+      };
     },
   };
 }

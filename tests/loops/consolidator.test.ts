@@ -512,3 +512,149 @@ describe("consolidatorPoll", () => {
     expect(summary.changed).toContain("url.path");
   });
 });
+
+describe("consolidatorRun — sync fallback (Anthropic-style, no batch)", () => {
+  it("runs every task via provider.chat() and stores completed row with local: batch id", async () => {
+    const chatMock = vi.fn(async () => ({
+      outputText: JSON.stringify({
+        changed: ["synced.one"],
+        insights: [],
+        gaps: ["why?"],
+        retirements: [],
+      }),
+      parsed: {
+        changed: ["synced.one"],
+        insights: [],
+        gaps: ["why?"],
+        retirements: [],
+      },
+      responseId: "resp_mock",
+      systemFingerprint: null,
+      usage: {
+        inputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        costInUsdTicks: 0,
+      },
+      toolCalls: [],
+      rawResponse: {},
+    }));
+
+    const mockProvider = {
+      name: "anthropic",
+      capabilities: {
+        structuredOutput: true,
+        mcp: true,
+        serverSideTools: [] as readonly string[],
+        batch: false,
+        promptCacheKey: true,
+        previousResponseId: false,
+        functionToolLoop: true,
+        computerUse: true,
+        maxContextTokens: 200_000,
+      },
+      chat: chatMock,
+    };
+
+    const llmModule = await import("@/clients/llm");
+    const llmSpy = vi.spyOn(llmModule, "llm").mockReturnValue(mockProvider as never);
+
+    try {
+      const { consolidatorRunWithResult } = await import("@/loops/consolidator");
+      const result = await consolidatorRunWithResult();
+      expect(result.batchId.startsWith("local:")).toBe(true);
+      expect(chatMock).toHaveBeenCalledTimes(5);
+
+      const row = db()
+        .prepare(
+          "SELECT status, batch_id, summary_json, completed_at FROM consolidator_runs WHERE id = ?",
+        )
+        .get(result.runId) as {
+        status: string;
+        batch_id: string;
+        summary_json: string | null;
+        completed_at: string | null;
+      };
+      expect(row.status).toBe("completed");
+      expect(row.batch_id.startsWith("local:")).toBe(true);
+      expect(row.completed_at).toBeTruthy();
+
+      const summary = JSON.parse(row.summary_json ?? "{}") as {
+        changed: string[];
+        gaps: string[];
+        failed_tasks: string[];
+      };
+      expect(summary.changed.filter((c) => c === "synced.one")).toHaveLength(5);
+      expect(summary.gaps.filter((g) => g === "why?")).toHaveLength(5);
+      expect(summary.failed_tasks).toHaveLength(0);
+    } finally {
+      llmSpy.mockRestore();
+    }
+  });
+
+  it("records failed_tasks when chat() throws but still completes", async () => {
+    let calls = 0;
+    const chatMock = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("provider boom");
+      return {
+        outputText: "",
+        parsed: {
+          changed: ["ok"],
+          insights: [],
+          gaps: [],
+          retirements: [],
+        },
+        responseId: "resp",
+        systemFingerprint: null,
+        usage: {
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          reasoningTokens: 0,
+          costInUsdTicks: 0,
+        },
+        toolCalls: [],
+        rawResponse: {},
+      };
+    });
+
+    const mockProvider = {
+      name: "anthropic",
+      capabilities: {
+        structuredOutput: true,
+        mcp: true,
+        serverSideTools: [] as readonly string[],
+        batch: false,
+        promptCacheKey: true,
+        previousResponseId: false,
+        functionToolLoop: true,
+        computerUse: true,
+        maxContextTokens: 200_000,
+      },
+      chat: chatMock,
+    };
+
+    const llmModule = await import("@/clients/llm");
+    const llmSpy = vi.spyOn(llmModule, "llm").mockReturnValue(mockProvider as never);
+
+    try {
+      const { consolidatorRunWithResult } = await import("@/loops/consolidator");
+      const result = await consolidatorRunWithResult();
+      const row = db()
+        .prepare("SELECT status, summary_json FROM consolidator_runs WHERE id = ?")
+        .get(result.runId) as { status: string; summary_json: string | null };
+      expect(row.status).toBe("completed");
+      const summary = JSON.parse(row.summary_json ?? "{}") as {
+        changed: string[];
+        failed_tasks: string[];
+      };
+      expect(summary.failed_tasks).toHaveLength(1);
+      expect(summary.failed_tasks[0]).toContain("provider boom");
+      expect(summary.changed).toEqual(expect.arrayContaining(["ok"]));
+    } finally {
+      llmSpy.mockRestore();
+    }
+  });
+});

@@ -326,6 +326,53 @@ describe("makeXaiProvider.chat", () => {
   });
 });
 
+describe("makeXaiProvider.buildBatchLine", () => {
+  it("returns a /v1/responses line with the snake_case body shape", () => {
+    const p = makeProvider();
+    if (!p.buildBatchLine) throw new Error("xai provider missing buildBatchLine");
+
+    const line = p.buildBatchLine(
+      {
+        model: "grok-4.20-reasoning",
+        messages: [
+          { role: "system", content: "persona" },
+          { role: "user", content: "Task: foo" },
+        ],
+        maxOutputTokens: 500,
+        maxTurns: 5,
+        promptCacheKey: "strand:consolidator:v1",
+        include: ["mcp_call_output", "reasoning.encrypted_content"],
+        structuredOutput: {
+          name: "summary",
+          schema: { type: "object", properties: { ok: { type: "boolean" } } },
+          strict: true,
+        },
+      },
+      "c1",
+    );
+
+    expect(line.custom_id).toBe("c1");
+    expect(line.method).toBe("POST");
+    expect(line.url).toBe("/v1/responses");
+    expect(line.body["model"]).toBe("grok-4.20-reasoning");
+    expect(line.body["max_output_tokens"]).toBe(500);
+    expect(line.body["max_turns"]).toBe(5);
+    expect(line.body["prompt_cache_key"]).toBe("strand:consolidator:v1");
+    expect(line.body["include"]).toEqual(["mcp_call_output", "reasoning.encrypted_content"]);
+    const rf = line.body["response_format"] as Record<string, unknown>;
+    expect(rf["type"]).toBe("json_schema");
+    const input = line.body["input"] as Array<{ role: string; content: string }>;
+    expect(input[0]).toEqual({ role: "system", content: "persona" });
+    expect(input[1]?.role).toBe("user");
+    // Reasoning-model param hygiene.
+    expect(line.body["presence_penalty"]).toBeUndefined();
+    expect(line.body["frequency_penalty"]).toBeUndefined();
+    expect(line.body["stop"]).toBeUndefined();
+    expect(line.body["reasoning_effort"]).toBeUndefined();
+    expect(line.body["temperature"]).toBeUndefined();
+  });
+});
+
 describe("makeXaiProvider batch round-trip", () => {
   it("uploads JSONL, creates batch, fetches handle, streams results", async () => {
     const p = makeProvider();
