@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { duplicatesRule, recordPostText } from "@/policy/duplicates";
+import { describe, expect, it } from "vitest";
 import { fx } from "../fixtures/candidate";
 import { freshDb } from "../helpers/db";
 
@@ -18,8 +18,15 @@ describe("duplicatesRule", () => {
 
   it("passes when text is clearly different from prior posts", () => {
     const db = freshDb();
-    recordPostText(db, "tw_a", "reasoning models are cheaper than you think if you stop sending junk context");
-    const r = duplicatesRule(db, fx.reply("pgvector holds up to 10M rows before the hnsw engines pull ahead"));
+    recordPostText(
+      db,
+      "tw_a",
+      "reasoning models are cheaper than you think if you stop sending junk context",
+    );
+    const r = duplicatesRule(
+      db,
+      fx.reply("pgvector holds up to 10M rows before the hnsw engines pull ahead"),
+    );
     expect(r.ok).toBe(true);
   });
 
@@ -49,9 +56,11 @@ describe("duplicatesRule", () => {
   it("ignores posts older than 7 days", () => {
     const db = freshDb();
     const original = "reasoning models are cheaper than you think if you stop sending junk context";
-    db.prepare(
-      "INSERT INTO post_embeddings (tweet_id, text, created_at) VALUES (?, ?, ?)",
-    ).run("tw_old", original, new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString());
+    db.prepare("INSERT INTO post_embeddings (tweet_id, text, created_at) VALUES (?, ?, ?)").run(
+      "tw_old",
+      original,
+      new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+    );
     const r = duplicatesRule(db, fx.reply(original));
     expect(r.ok).toBe(true);
   });

@@ -2,9 +2,7 @@ import { db } from "@/db";
 
 function main(): void {
   const events = db()
-    .prepare(
-      "SELECT id, kind, created_at FROM perceived_events ORDER BY created_at DESC LIMIT 20",
-    )
+    .prepare("SELECT id, kind, created_at FROM perceived_events ORDER BY created_at DESC LIMIT 20")
     .all() as Array<{ id: string; kind: string; created_at: string }>;
 
   const actions = db()
@@ -19,7 +17,9 @@ function main(): void {
   }
   process.stdout.write("\nrecent actions:\n");
   for (const a of actions) {
-    process.stdout.write(`  [${a.created_at}] ${a.status.padEnd(9)} ${a.kind.padEnd(8)} ${a.rationale.slice(0, 80)}\n`);
+    process.stdout.write(
+      `  [${a.created_at}] ${a.status.padEnd(9)} ${a.kind.padEnd(8)} ${a.rationale.slice(0, 80)}\n`,
+    );
   }
 }
 

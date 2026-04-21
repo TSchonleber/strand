@@ -48,7 +48,6 @@ export type Env = z.infer<typeof EnvSchema>;
 export const env: Env = (() => {
   const parsed = EnvSchema.safeParse(process.env);
   if (!parsed.success) {
-    // biome-ignore lint/suspicious/noConsoleLog: boot-time fatal path
     console.error("Invalid env:\n", parsed.error.format());
     process.exit(1);
   }

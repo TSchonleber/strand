@@ -59,9 +59,7 @@ export async function executeApproved(
 
   if (env.STRAND_MODE === "shadow") {
     log.info({ key, kind: c.action.kind }, "actor.shadow");
-    db()
-      .prepare("UPDATE action_log SET status = 'executed' WHERE idempotency_key = ?")
-      .run(key);
+    db().prepare("UPDATE action_log SET status = 'executed' WHERE idempotency_key = ?").run(key);
     return;
   }
 
@@ -112,7 +110,11 @@ export async function executeApproved(
       .run(code, msg, Date.now() - t0, key);
 
     try {
-      await brain.outcome_annotate({ decision_id: decisionId, outcome: "failure", signals: { error: msg } });
+      await brain.outcome_annotate({
+        decision_id: decisionId,
+        outcome: "failure",
+        signals: { error: msg },
+      });
     } catch (e2) {
       log.warn({ err: e2 }, "actor.outcome_annotate_failed");
     }

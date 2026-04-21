@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { idempotencyKey, newDecisionId } from "@/util/idempotency";
+import { describe, expect, it } from "vitest";
 
 describe("idempotencyKey", () => {
   it("is stable across calls with same inputs", () => {

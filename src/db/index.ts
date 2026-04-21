@@ -1,8 +1,8 @@
-import { readFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import Database from "better-sqlite3";
 import { env } from "@/config";
 import { log } from "@/util/log";
+import Database from "better-sqlite3";
 
 let _db: Database.Database | null = null;
 

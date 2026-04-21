@@ -1,8 +1,8 @@
-import type { UserV2 } from "twitter-api-v2";
 import { brain } from "@/clients/brain";
 import { userClient } from "@/clients/x";
 import { env } from "@/config";
 import { log } from "@/util/log";
+import type { UserV2 } from "twitter-api-v2";
 
 /**
  * One-shot ingestion of the account's current followers + following lists
@@ -94,7 +94,9 @@ async function main(): Promise<void> {
   process.exit(0);
 }
 
-async function paginate(fetchPage: (pageToken: string | undefined) => Promise<Page>): Promise<UserV2[]> {
+async function paginate(
+  fetchPage: (pageToken: string | undefined) => Promise<Page>,
+): Promise<UserV2[]> {
   const out: UserV2[] = [];
   let cursor: string | undefined;
   do {

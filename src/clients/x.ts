@@ -1,7 +1,7 @@
-import { TwitterApi, type TwitterApiTokens } from "twitter-api-v2";
 import { env } from "@/config";
-import { log } from "@/util/log";
 import type { Action } from "@/types/actions";
+import { log } from "@/util/log";
+import { TwitterApi, type TwitterApiTokens } from "twitter-api-v2";
 
 /**
  * Narrow, typed X API v2 wrapper.
@@ -50,9 +50,11 @@ export async function refreshUserTokenIfNeeded(): Promise<void> {
   const { accessToken, refreshToken, expiresIn } = await oauth.refreshOAuth2Token(
     env.X_USER_REFRESH_TOKEN,
   );
-  process.env["X_USER_ACCESS_TOKEN"] = accessToken;
-  if (refreshToken) process.env["X_USER_REFRESH_TOKEN"] = refreshToken;
-  process.env["X_USER_TOKEN_EXPIRES_AT"] = new Date(Date.now() + expiresIn * 1000).toISOString();
+  Object.assign(process.env, {
+    X_USER_ACCESS_TOKEN: accessToken,
+    ...(refreshToken ? { X_USER_REFRESH_TOKEN: refreshToken } : {}),
+    X_USER_TOKEN_EXPIRES_AT: new Date(Date.now() + expiresIn * 1000).toISOString(),
+  });
   _userClient = null;
   log.info({ svc: "x" }, "x.token_refreshed");
 }
@@ -102,6 +104,11 @@ async function withRefresh<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export async function execute(action: Action): Promise<WriteResult> {
+  if (action.kind === "project_proposal") {
+    throw new Error(
+      "project_proposal is an internal Builder-queue action; it must not reach x.execute",
+    );
+  }
   const t0 = Date.now();
   const result = await withRefresh(async () => {
     const c = userClient();

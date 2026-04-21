@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
 import { effectiveCap, policies } from "@/config";
 import { rateCapsRule } from "@/policy/rateCaps";
 import { RateLimiter } from "@/util/ratelimit";
+import { beforeEach, describe, expect, it } from "vitest";
 import { fx } from "../fixtures/candidate";
 import { freshDb } from "../helpers/db";
 

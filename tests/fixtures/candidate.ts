@@ -29,14 +29,22 @@ export function makeCandidate(
 }
 
 export const fx = {
-  post: (text = "a concrete technical observation with a number: p99 dropped to 780ms.", o?: Partial<CandidateEnvelope>) =>
-    makeCandidate({ kind: "post", text }, o),
+  post: (
+    text = "a concrete technical observation with a number: p99 dropped to 780ms.",
+    o?: Partial<CandidateEnvelope>,
+  ) => makeCandidate({ kind: "post", text }, o),
 
-  reply: (text = "depends on the harness. with a world-model tool you can hold a 40-step task for ~90m.", tweetId = "tw_1", o?: Partial<CandidateEnvelope>) =>
-    makeCandidate({ kind: "reply", tweetId, text }, o),
+  reply: (
+    text = "depends on the harness. with a world-model tool you can hold a 40-step task for ~90m.",
+    tweetId = "tw_1",
+    o?: Partial<CandidateEnvelope>,
+  ) => makeCandidate({ kind: "reply", tweetId, text }, o),
 
-  quote: (text = "pgvector is fine up to 10M rows, past that use a dedicated engine.", tweetId = "tw_1", o?: Partial<CandidateEnvelope>) =>
-    makeCandidate({ kind: "quote", tweetId, text }, o),
+  quote: (
+    text = "pgvector is fine up to 10M rows, past that use a dedicated engine.",
+    tweetId = "tw_1",
+    o?: Partial<CandidateEnvelope>,
+  ) => makeCandidate({ kind: "quote", tweetId, text }, o),
 
   like: (tweetId = "tw_1", o?: Partial<CandidateEnvelope>) =>
     makeCandidate({ kind: "like", tweetId }, o),
@@ -50,6 +58,9 @@ export const fx = {
   unfollow: (userId = "u_1", o?: Partial<CandidateEnvelope>) =>
     makeCandidate({ kind: "unfollow", userId }, o),
 
-  dm: (text = "hey, your post on retrieval lined up with what we saw at scale. wanted to compare notes.", userId = "u_1", o?: Partial<CandidateEnvelope>) =>
-    makeCandidate({ kind: "dm", userId, text }, { targetEntityId: `ent:${userId}`, ...o }),
+  dm: (
+    text = "hey, your post on retrieval lined up with what we saw at scale. wanted to compare notes.",
+    userId = "u_1",
+    o?: Partial<CandidateEnvelope>,
+  ) => makeCandidate({ kind: "dm", userId, text }, { targetEntityId: `ent:${userId}`, ...o }),
 };

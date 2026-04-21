@@ -1,6 +1,6 @@
-import type Database from "better-sqlite3";
 import { policies } from "@/config";
 import type { Candidate, CandidateState } from "@/types/actions";
+import type Database from "better-sqlite3";
 
 export interface CooldownResult {
   ok: boolean;

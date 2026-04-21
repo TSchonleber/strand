@@ -58,7 +58,7 @@ export function start(): void {
               c.confidence,
               c.relevanceScore,
               c.targetEntityId ?? null,
-              (process.env["STRAND_MODE"] ?? "shadow"),
+              process.env["STRAND_MODE"] ?? "shadow",
               JSON.stringify({ reasons: verdict.reasons, ruleIds: verdict.ruleIds }),
             );
         }

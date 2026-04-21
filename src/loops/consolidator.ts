@@ -1,5 +1,5 @@
 import { GROK_CONSOLIDATOR_TOOLS } from "@/clients/brain";
-import { brainctlMcpTool, grokCall, type GrokTool } from "@/clients/grok";
+import { type GrokTool, brainctlMcpTool, grokCall } from "@/clients/grok";
 import { env } from "@/config";
 import { loadPrompt } from "@/prompts";
 import { loopLog } from "@/util/log";

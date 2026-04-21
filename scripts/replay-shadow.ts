@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { db } from "@/db";
 import { evaluate, makeGate } from "@/policy";
@@ -89,10 +89,7 @@ async function main(): Promise<void> {
     }
   }
 
-  log.info(
-    { total: lines.length, approved, rejected, invalid },
-    "shadow.replay.done",
-  );
+  log.info({ total: lines.length, approved, rejected, invalid }, "shadow.replay.done");
   process.stdout.write(
     `replayed ${lines.length}: approved=${approved} rejected=${rejected} invalid=${invalid}\n`,
   );

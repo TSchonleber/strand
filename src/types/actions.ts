@@ -74,8 +74,7 @@ export type CandidateState = "proposed" | "approved" | "rejected";
 declare const brand: unique symbol;
 type Brand<S extends CandidateState> = { readonly [brand]: S };
 
-export type Candidate<S extends CandidateState = "proposed"> =
-  CandidateEnvelope & Brand<S>;
+export type Candidate<S extends CandidateState = "proposed"> = CandidateEnvelope & Brand<S>;
 
 export function proposed(env: CandidateEnvelope): Candidate<"proposed"> {
   return env as Candidate<"proposed">;
@@ -83,15 +82,11 @@ export function proposed(env: CandidateEnvelope): Candidate<"proposed"> {
 
 // NOTE: `approve` is ONLY exported from src/policy/index.ts.
 // This type lives here; the minting function lives in the policy module.
-export function __unsafeMarkApproved(
-  c: Candidate<"proposed">,
-): Candidate<"approved"> {
+export function __unsafeMarkApproved(c: Candidate<"proposed">): Candidate<"approved"> {
   return c as unknown as Candidate<"approved">;
 }
 
-export function __unsafeMarkRejected(
-  c: Candidate<"proposed">,
-): Candidate<"rejected"> {
+export function __unsafeMarkRejected(c: Candidate<"proposed">): Candidate<"rejected"> {
   return c as unknown as Candidate<"rejected">;
 }
 

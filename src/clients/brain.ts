@@ -1,8 +1,8 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { env } from "@/config";
 import { log } from "@/util/log";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 /**
  * brainctl wrapper.
@@ -50,7 +50,10 @@ export async function disconnect(): Promise<void> {
 
 async function tool<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
   const c = await connect();
-  const result = await c.callTool({ name, arguments: { agent_id: env.BRAINCTL_AGENT_ID, ...args } });
+  const result = await c.callTool({
+    name,
+    arguments: { agent_id: env.BRAINCTL_AGENT_ID, ...args },
+  });
   // MCP returns { content: [{ type: 'text', text: '...' }] } by default.
   // brainctl also returns structured JSON as text — parse leniently.
   const content = (result.content as Array<{ type: string; text?: string }> | undefined) ?? [];
@@ -67,8 +70,7 @@ async function tool<T = unknown>(name: string, args: Record<string, unknown>): P
 
 export const brain = {
   // Boot
-  agent_register: (args: { persona: string; goals: string[] }) =>
-    tool("agent_register", args),
+  agent_register: (args: { persona: string; goals: string[] }) => tool("agent_register", args),
 
   // Beliefs / policies
   belief_seed: (args: { beliefs: Array<{ key: string; value: string }> }) =>
@@ -79,8 +81,7 @@ export const brain = {
     rule: string;
     priority?: number;
   }) => tool("policy_add", args),
-  budget_set: (args: { scope: string; amount: number; unit: string }) =>
-    tool("budget_set", args),
+  budget_set: (args: { scope: string; amount: number; unit: string }) => tool("budget_set", args),
 
   // Perceiver direct writes
   event_add: (args: { kind: string; payload: unknown; entity_refs?: string[] }) =>

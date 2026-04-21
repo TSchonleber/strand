@@ -1,13 +1,9 @@
 import { GROK_READ_TOOLS } from "@/clients/brain";
-import { brainctlMcpTool, grokCall, type GrokTool } from "@/clients/grok";
+import { type GrokTool, brainctlMcpTool, grokCall } from "@/clients/grok";
 import { env, persona } from "@/config";
 import { db } from "@/db";
 import { loadPrompt } from "@/prompts";
-import {
-  type CandidateEnvelope,
-  CandidateEnvelopeSchema,
-  proposed,
-} from "@/types/actions";
+import { type CandidateEnvelope, CandidateEnvelopeSchema, proposed } from "@/types/actions";
 import { loopLog } from "@/util/log";
 
 const log = loopLog("reasoner");
@@ -57,10 +53,7 @@ export async function reasonerTick(): Promise<CandidateEnvelope[]> {
   const personaPrompt = loadPrompt("persona");
   const reasonerPrompt = loadPrompt("reasoner.system");
 
-  const tools: GrokTool[] = [
-    { type: "x_search" },
-    { type: "web_search" },
-  ];
+  const tools: GrokTool[] = [{ type: "x_search" }, { type: "web_search" }];
 
   if (env.BRAINCTL_REMOTE_MCP_URL) {
     tools.push(

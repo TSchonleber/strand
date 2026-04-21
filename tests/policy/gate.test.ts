@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { persona, policies } from "@/config";
 import { closeDb, db } from "@/db";
 import { evaluate, makeGate } from "@/policy";
-import { persona, policies } from "@/config";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fx } from "../fixtures/candidate";
 
 /**
@@ -49,9 +49,9 @@ describe("policy gate", () => {
     expect(v.approved).toBe(false);
     if (!v.approved) {
       // Either explicit review flag OR dm.mutual_required if no target entity
-      expect(v.reasons.some((r) => r === "requires_human_review" || r === "dm_no_mutual_context")).toBe(
-        true,
-      );
+      expect(
+        v.reasons.some((r) => r === "requires_human_review" || r === "dm_no_mutual_context"),
+      ).toBe(true);
     }
   });
 

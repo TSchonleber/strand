@@ -18,8 +18,12 @@ export async function perceiverTick(): Promise<void> {
   const t0 = Date.now();
   try {
     const [mentions, timeline] = await Promise.all([
-      x.fetchMentions(state.lastMentionId ? { sinceId: state.lastMentionId, max: 50 } : { max: 50 }),
-      x.fetchHomeTimeline(state.lastTimelineId ? { sinceId: state.lastTimelineId, max: 50 } : { max: 50 }),
+      x.fetchMentions(
+        state.lastMentionId ? { sinceId: state.lastMentionId, max: 50 } : { max: 50 },
+      ),
+      x.fetchHomeTimeline(
+        state.lastTimelineId ? { sinceId: state.lastTimelineId, max: 50 } : { max: 50 },
+      ),
     ]);
 
     for (const m of mentions) {
@@ -74,9 +78,7 @@ export async function perceiverTick(): Promise<void> {
 
 async function persistEvent(ev: PerceivedEvent): Promise<void> {
   db()
-    .prepare(
-      "INSERT OR IGNORE INTO perceived_events (id, kind, payload_json) VALUES (?, ?, ?)",
-    )
+    .prepare("INSERT OR IGNORE INTO perceived_events (id, kind, payload_json) VALUES (?, ?, ?)")
     .run(ev.id, ev.kind, JSON.stringify(ev));
 
   try {

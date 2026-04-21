@@ -41,9 +41,7 @@ export class RateLimiter {
     const now = args.now ?? Date.now();
     const { bucket, resetAt } = this.bucketOf(now, args.windowMs);
     const row = this.db
-      .prepare(
-        "SELECT count FROM rate_counters WHERE scope = ? AND kind = ? AND bucket = ?",
-      )
+      .prepare("SELECT count FROM rate_counters WHERE scope = ? AND kind = ? AND bucket = ?")
       .get(args.scope, args.kind, bucket) as { count: number } | undefined;
     const count = row?.count ?? 0;
     return {

@@ -1,6 +1,6 @@
-import type Database from "better-sqlite3";
 import { policies } from "@/config";
 import type { Candidate } from "@/types/actions";
+import type Database from "better-sqlite3";
 
 /**
  * Duplicate-text guard. We store recent post/reply text in SQLite and use
@@ -30,10 +30,7 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return union === 0 ? 0 : inter / union;
 }
 
-export function duplicatesRule(
-  db: Database.Database,
-  c: Candidate<"proposed">,
-): DuplicatesResult {
+export function duplicatesRule(db: Database.Database, c: Candidate<"proposed">): DuplicatesResult {
   const a = c.action;
   if (!("text" in a)) return { ok: true, reasons: [], ruleIds: [] };
 

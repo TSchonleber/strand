@@ -1,7 +1,7 @@
-import OpenAI from "openai";
-import { z } from "zod";
 import { env } from "@/config";
 import { log } from "@/util/log";
+import OpenAI from "openai";
+import { z } from "zod";
 
 /**
  * Grok client. OpenAI SDK pointed at xAI's Responses API.
@@ -181,8 +181,10 @@ export async function grokCall<T = unknown>(input: GrokCallInput): Promise<GrokC
   const outputText = String((resp as { output_text?: string }).output_text ?? "");
   const usageRaw = (resp["usage"] as Record<string, number>) ?? {};
 
-  const inputDetails = (usageRaw["input_tokens_details"] as Record<string, number> | undefined) ?? {};
-  const outputDetails = (usageRaw["output_tokens_details"] as Record<string, number> | undefined) ?? {};
+  const inputDetails =
+    (usageRaw["input_tokens_details"] as Record<string, number> | undefined) ?? {};
+  const outputDetails =
+    (usageRaw["output_tokens_details"] as Record<string, number> | undefined) ?? {};
   const usage = {
     inputTokens: usageRaw["input_tokens"] ?? usageRaw["prompt_tokens"] ?? 0,
     cachedInputTokens:

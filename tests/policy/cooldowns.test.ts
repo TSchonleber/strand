@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import { checkCooldown, recordActionCooldowns } from "@/policy/cooldowns";
 import { __unsafeMarkApproved } from "@/types/actions";
+import { describe, expect, it } from "vitest";
 import { fx } from "../fixtures/candidate";
 import { freshDb } from "../helpers/db";
 

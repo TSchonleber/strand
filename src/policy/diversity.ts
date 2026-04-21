@@ -1,6 +1,6 @@
-import type Database from "better-sqlite3";
 import { policies } from "@/config";
 import type { Candidate } from "@/types/actions";
+import type Database from "better-sqlite3";
 
 export interface DiversityResult {
   ok: boolean;
@@ -13,19 +13,23 @@ export function diversityRule(db: Database.Database, c: Candidate<"proposed">): 
   const ruleIds: string[] = [];
 
   const dayStart = new Date(new Date().toISOString().slice(0, 10)).toISOString();
-  const total = (db
-    .prepare(
-      "SELECT COUNT(*) AS n FROM action_log WHERE status IN ('executed', 'approved') AND created_at >= ?",
-    )
-    .get(dayStart) as { n: number }).n;
+  const total = (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM action_log WHERE status IN ('executed', 'approved') AND created_at >= ?",
+      )
+      .get(dayStart) as { n: number }
+  ).n;
 
   if (total === 0) return { ok: true, reasons, ruleIds };
 
-  const sameKind = (db
-    .prepare(
-      "SELECT COUNT(*) AS n FROM action_log WHERE status IN ('executed', 'approved') AND kind = ? AND created_at >= ?",
-    )
-    .get(c.action.kind, dayStart) as { n: number }).n;
+  const sameKind = (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM action_log WHERE status IN ('executed', 'approved') AND kind = ? AND created_at >= ?",
+      )
+      .get(c.action.kind, dayStart) as { n: number }
+  ).n;
 
   const share = (sameKind + 1) / (total + 1);
   if (share > policies.diversity.max_share_per_kind) {

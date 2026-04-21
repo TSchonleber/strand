@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import { persona } from "@/config";
 import { prefilterText } from "@/util/prefilter";
+import { describe, expect, it } from "vitest";
 
 describe("prefilterText", () => {
   it("passes clean on-topic text", () => {

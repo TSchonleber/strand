@@ -1,8 +1,8 @@
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { appendFileSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { URL } from "node:url";
-import { TwitterApi } from "twitter-api-v2";
 import { env } from "@/config";
+import { TwitterApi } from "twitter-api-v2";
 
 /**
  * One-shot OAuth 2.0 PKCE flow. Captures access + refresh tokens and
@@ -30,12 +30,13 @@ async function main(): Promise<void> {
     clientSecret: env.X_CLIENT_SECRET,
   });
 
-  const { url, codeVerifier, state } = oauth.generateOAuth2AuthLink(
-    env.X_OAUTH_REDIRECT_URI,
-    { scope: SCOPES },
-  );
+  const { url, codeVerifier, state } = oauth.generateOAuth2AuthLink(env.X_OAUTH_REDIRECT_URI, {
+    scope: SCOPES,
+  });
 
-  process.stdout.write(`\nOpen this URL in a browser logged in as the Strand account:\n\n${url}\n\n`);
+  process.stdout.write(
+    `\nOpen this URL in a browser logged in as the Strand account:\n\n${url}\n\n`,
+  );
 
   const port = Number(new URL(env.X_OAUTH_REDIRECT_URI).port || "4567");
   const server = createServer(async (req, res) => {
@@ -47,7 +48,12 @@ async function main(): Promise<void> {
       return;
     }
     try {
-      const { client: _c, accessToken, refreshToken, expiresIn } = await oauth.loginWithOAuth2({
+      const {
+        client: _c,
+        accessToken,
+        refreshToken,
+        expiresIn,
+      } = await oauth.loginWithOAuth2({
         code,
         codeVerifier,
         redirectUri: env.X_OAUTH_REDIRECT_URI,
@@ -64,7 +70,7 @@ async function main(): Promise<void> {
 
       res.writeHead(200).end(`ok — captured tokens for @${me.data.username}`);
       process.stdout.write(`\ncaptured tokens for @${me.data.username} (id=${me.data.id})\n`);
-      process.stdout.write(`tokens written to .env\n`);
+      process.stdout.write("tokens written to .env\n");
       setTimeout(() => process.exit(0), 500);
     } catch (err) {
       res.writeHead(500).end(`error: ${String(err)}`);

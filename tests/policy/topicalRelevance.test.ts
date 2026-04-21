@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import { policies } from "@/config";
 import { relevanceRule } from "@/policy/topicalRelevance";
+import { describe, expect, it } from "vitest";
 import { fx } from "../fixtures/candidate";
 
 describe("relevanceRule", () => {

@@ -23,7 +23,12 @@ async function main(): Promise<void> {
   await brain.belief_seed({ beliefs });
 
   // Core policies — read-only in brainctl, used for policy_match at reasoning time.
-  const catalog: Array<{ policy_id: string; description: string; rule: string; priority?: number }> = [
+  const catalog: Array<{
+    policy_id: string;
+    description: string;
+    rule: string;
+    priority?: number;
+  }> = [
     {
       policy_id: "dm.mutual_only",
       description: "DMs only to mutuals who engaged in last 14 days",
@@ -39,7 +44,7 @@ async function main(): Promise<void> {
     {
       policy_id: "cooldown.per_target",
       description: "No repeat action on same target within cooldown",
-      rule: `cooldown_minutes(target, any) <= now - last_action(target)`,
+      rule: "cooldown_minutes(target, any) <= now - last_action(target)",
       priority: 95,
     },
     {

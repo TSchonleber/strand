@@ -11,7 +11,9 @@ export interface RateRuleResult {
   ruleIds: string[];
 }
 
-function kindToCapKey(kind: Candidate<"proposed">["action"]["kind"]): keyof typeof policies.caps_per_day {
+type XWriteKind = Exclude<Candidate<"proposed">["action"]["kind"], "project_proposal">;
+
+function kindToCapKey(kind: XWriteKind): keyof typeof policies.caps_per_day {
   switch (kind) {
     case "post":
       return "posts";
@@ -37,6 +39,9 @@ export function rateCapsRule(c: Candidate<"proposed">, rl: RateLimiter): RateRul
   const ruleIds: string[] = [];
 
   const kind = c.action.kind;
+  if (kind === "project_proposal") {
+    return { ok: true, reasons, ruleIds };
+  }
   const capKey = kindToCapKey(kind);
   const dailyCap = effectiveCap(capKey);
 

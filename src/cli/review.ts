@@ -8,7 +8,12 @@ async function main(): Promise<void> {
     .prepare(
       "SELECT id, decision_id, payload_json, reasons_json FROM human_review_queue WHERE decided_at IS NULL ORDER BY created_at ASC LIMIT 50",
     )
-    .all() as Array<{ id: number; decision_id: string; payload_json: string; reasons_json: string | null }>;
+    .all() as Array<{
+    id: number;
+    decision_id: string;
+    payload_json: string;
+    reasons_json: string | null;
+  }>;
 
   if (rows.length === 0) {
     process.stdout.write("no pending reviews\n");
