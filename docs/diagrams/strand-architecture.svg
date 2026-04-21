@@ -1,0 +1,407 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1500" role="img" aria-label="Strand agent harness architecture diagram" font-family="ui-sans-serif, -apple-system, system-ui, Segoe UI, Inter, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="gateGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7f1d1d"/>
+      <stop offset="1" stop-color="#450a0a"/>
+    </linearGradient>
+    <linearGradient id="loopBlue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e3a8a"/><stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="loopViolet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4c1d95"/><stop offset="1" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="loopCyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#155e75"/><stop offset="1" stop-color="#083344"/>
+    </linearGradient>
+    <linearGradient id="loopAmber" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#854d0e"/><stop offset="1" stop-color="#451a03"/>
+    </linearGradient>
+    <linearGradient id="extX" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0ea5e9"/><stop offset="1" stop-color="#075985"/>
+    </linearGradient>
+    <linearGradient id="extXai" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#a855f7"/><stop offset="1" stop-color="#581c87"/>
+    </linearGradient>
+    <linearGradient id="extBrain" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#10b981"/><stop offset="1" stop-color="#065f46"/>
+    </linearGradient>
+    <linearGradient id="store" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0f766e"/><stop offset="1" stop-color="#042f2e"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981"/>
+    </marker>
+    <marker id="arrowPurple" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c084fc"/>
+    </marker>
+    <marker id="arrowSky" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f87171"/>
+    </marker>
+    <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .title { font-size: 48px; font-weight: 800; fill: #e2e8f0; letter-spacing: -0.02em; }
+      .subtitle { font-size: 18px; fill: #94a3b8; letter-spacing: 0.02em; }
+      .zone { font-size: 13px; font-weight: 700; fill: #94a3b8; letter-spacing: 0.15em; text-transform: uppercase; }
+      .card-title { font-size: 22px; font-weight: 700; fill: #e2e8f0; }
+      .card-kicker { font-size: 12px; font-weight: 600; fill: #cbd5e1; letter-spacing: 0.1em; text-transform: uppercase; }
+      .card-body { font-size: 14px; fill: #cbd5e1; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; fill: #a5f3fc; }
+      .mono-dim { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; fill: #64748b; }
+      .pill { font-size: 11px; font-weight: 600; fill: #f1f5f9; }
+      .tag { font-size: 11px; fill: #94a3b8; letter-spacing: 0.05em; }
+      .arrow-label { font-size: 12px; font-weight: 600; fill: #e2e8f0; }
+      .arrow-sub { font-size: 10px; fill: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .warn { fill: #fca5a5; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; }
+      .note { font-size: 11px; fill: #64748b; font-style: italic; }
+    </style>
+  </defs>
+
+  <!-- background -->
+  <rect width="2000" height="1500" fill="url(#bg)"/>
+  <g opacity="0.08">
+    <circle cx="400" cy="200" r="300" fill="#3b82f6" filter="url(#soft)"/>
+    <circle cx="1600" cy="300" r="300" fill="#a855f7" filter="url(#soft)"/>
+    <circle cx="1000" cy="1200" r="350" fill="#ef4444" filter="url(#soft)"/>
+  </g>
+
+  <!-- header -->
+  <g transform="translate(60,70)">
+    <text class="title" y="0">Strand</text>
+    <text class="title" y="52" fill="#64748b" font-weight="500">· agent harness</text>
+    <text class="subtitle" y="90">four loops · typestate policy gate · brainctl long-term memory · xAI Grok reasoning</text>
+    <g transform="translate(1520,-20)">
+      <rect width="380" height="100" rx="14" fill="#0f172a" stroke="#1e293b"/>
+      <text class="zone" x="20" y="26">phase</text>
+      <text class="card-title" x="20" y="54" font-size="18">Phase 2 — integration boot</text>
+      <text class="card-body" x="20" y="78" fill="#94a3b8">84 tests · typecheck clean · smoke 254 ms</text>
+    </g>
+  </g>
+
+  <!-- EXTERNAL ROW -->
+  <g transform="translate(60,210)">
+    <text class="zone">external services</text>
+    <!-- X API -->
+    <g transform="translate(0,20)">
+      <rect width="580" height="150" rx="16" fill="url(#extX)" opacity="0.88"/>
+      <rect width="580" height="150" rx="16" fill="none" stroke="#38bdf8" stroke-opacity="0.5"/>
+      <text class="card-kicker" x="24" y="32" fill="#bae6fd">🐦  X API v2</text>
+      <text class="card-title" x="24" y="64" fill="#f0f9ff">OAuth 2.0 PKCE · user context</text>
+      <text class="card-body" x="24" y="90" fill="#e0f2fe">Basic tier: 10k posts/mo · no follow endpoint</text>
+      <text class="mono" x="24" y="118" fill="#bae6fd">GET /2/users/:id/mentions · /timelines · /dm_events</text>
+      <text class="mono" x="24" y="136" fill="#bae6fd">POST /2/tweets · /likes · /dm_conversations</text>
+    </g>
+    <!-- xAI -->
+    <g transform="translate(620,20)">
+      <rect width="580" height="150" rx="16" fill="url(#extXai)" opacity="0.88"/>
+      <rect width="580" height="150" rx="16" fill="none" stroke="#c084fc" stroke-opacity="0.5"/>
+      <text class="card-kicker" x="24" y="32" fill="#f3e8ff">✦  xAI Responses API</text>
+      <text class="card-title" x="24" y="64" fill="#faf5ff">grok-4.20-reasoning · grok-4-1-fast-non-reasoning</text>
+      <text class="card-body" x="24" y="90" fill="#ede9fe">/v1/responses · /v1/files · /v1/batches (50% off)</text>
+      <text class="mono" x="24" y="118" fill="#f3e8ff">include: [mcp_call_output, reasoning.encrypted_content]</text>
+      <text class="mono" x="24" y="136" fill="#f3e8ff">max_turns: 5 · prompt_cache_key per loop</text>
+    </g>
+    <!-- brainctl -->
+    <g transform="translate(1240,20)">
+      <rect width="640" height="150" rx="16" fill="url(#extBrain)" opacity="0.88"/>
+      <rect width="640" height="150" rx="16" fill="none" stroke="#34d399" stroke-opacity="0.5"/>
+      <text class="card-kicker" x="24" y="32" fill="#a7f3d0">🧠  brainctl</text>
+      <text class="card-title" x="24" y="64" fill="#ecfdf5">long-term memory · dual surface</text>
+      <text class="card-body" x="24" y="90" fill="#d1fae5">remote MCP (HTTP/SSE) for Grok — READ ALLOWLIST only</text>
+      <text class="card-body" x="24" y="108" fill="#d1fae5">local stdio MCP for TS — mutations TS-direct</text>
+      <text class="mono" x="24" y="134" fill="#6ee7b7">memory_search · entity_get · temporal_* · reason</text>
+    </g>
+  </g>
+
+  <!-- STRAND PROCESS BOX -->
+  <g transform="translate(60,410)">
+    <rect width="1880" height="820" rx="22" fill="#0b1220" stroke="#1e293b" stroke-width="2"/>
+    <text class="zone" x="24" y="32">strand process · src/orchestrator.ts</text>
+    <text class="mono-dim" x="24" y="52">in-process intervals (dev) · BullMQ per loop (prod)</text>
+
+    <!-- PERCEIVER -->
+    <g transform="translate(40,80)">
+      <rect width="320" height="220" rx="16" fill="url(#loopBlue)" stroke="#3b82f6" stroke-opacity="0.6"/>
+      <text class="card-kicker" x="18" y="28" fill="#bfdbfe">perceiver</text>
+      <text class="card-title" x="18" y="56" fill="#dbeafe">every 120 s</text>
+      <text class="card-body" x="18" y="84">• poll own mentions (sinceId)</text>
+      <text class="card-body" x="18" y="104">• poll home timeline</text>
+      <text class="card-body" x="18" y="124">• poll DM events</text>
+      <text class="card-body" x="18" y="144">• NO external scouting (that's Grok)</text>
+      <rect x="18" y="160" width="280" height="44" rx="8" fill="#0b1220" stroke="#1e3a8a"/>
+      <text class="mono" x="28" y="178" fill="#93c5fd">src/loops/perceiver.ts → perceiverTick()</text>
+      <text class="mono-dim" x="28" y="194" fill="#64748b">err → caught, logged, loop continues</text>
+    </g>
+
+    <!-- REASONER -->
+    <g transform="translate(420,80)">
+      <rect width="460" height="380" rx="16" fill="url(#loopViolet)" stroke="#8b5cf6" stroke-opacity="0.6"/>
+      <text class="card-kicker" x="18" y="28" fill="#ddd6fe">reasoner</text>
+      <text class="card-title" x="18" y="56" fill="#ede9fe">every 300 s · grok-4.20-reasoning</text>
+      <text class="card-body" x="18" y="82">reads last 50 perceived_events</text>
+      <text class="card-body" x="18" y="102">emits up to 10 CandidateEnvelope[]</text>
+
+      <rect x="18" y="118" width="424" height="168" rx="10" fill="#0b1220" stroke="#4c1d95"/>
+      <text class="card-kicker" x="30" y="138" fill="#a78bfa">grokCall params</text>
+      <text class="mono" x="30" y="158" fill="#c4b5fd">tools: x_search · web_search · brainctl MCP</text>
+      <text class="mono" x="30" y="176" fill="#c4b5fd">toolChoice: auto · parallelToolCalls: true</text>
+      <text class="mono" x="30" y="194" fill="#c4b5fd">maxTurns: 5 · maxOutputTokens: 6000</text>
+      <text class="mono" x="30" y="212" fill="#c4b5fd">promptCacheKey: strand:reasoner:v1</text>
+      <text class="mono" x="30" y="230" fill="#c4b5fd">include: [mcp_call_output, reasoning.enc,</text>
+      <text class="mono" x="46" y="246" fill="#c4b5fd">x_search_call.action.sources]</text>
+      <text class="mono" x="30" y="266" fill="#c4b5fd">responseSchema: CandidateBatch (anyOf)</text>
+
+      <rect x="18" y="298" width="424" height="66" rx="10" fill="#0b1220" stroke="#4c1d95"/>
+      <text class="card-kicker" x="30" y="318" fill="#a78bfa">stuck-mid-thought retry</text>
+      <text class="card-body" x="30" y="338" fill="#c4b5fd" font-size="12">if candidates=0 AND toolCalls>0:</text>
+      <text class="mono" x="30" y="354" fill="#c4b5fd">grokCall({ previousResponseId: resp.id })</text>
+    </g>
+
+    <!-- POLICY GATE -->
+    <g transform="translate(940,80)">
+      <rect width="420" height="380" rx="16" fill="url(#gateGrad)" stroke="#ef4444" stroke-width="2"/>
+      <text class="card-kicker" x="18" y="28" fill="#fecaca">policy gate · typestate</text>
+      <text class="card-title" x="18" y="56" fill="#fee2e2">8 rules · no short-circuit</text>
+      <text class="card-body" x="18" y="82" fill="#fecaca">only path that mints Candidate&lt;approved&gt;</text>
+
+      <g transform="translate(18,100)">
+        <g><rect width="190" height="30" rx="6" fill="#7f1d1d" opacity="0.6"/><text class="pill" x="12" y="20" fill="#fee2e2">1 · banned topic</text></g>
+        <g transform="translate(200,0)"><rect width="190" height="30" rx="6" fill="#7f1d1d" opacity="0.6"/><text class="pill" x="12" y="20" fill="#fee2e2">2 · prefilter (regex+topic)</text></g>
+        <g transform="translate(0,40)"><rect width="190" height="30" rx="6" fill="#7f1d1d" opacity="0.6"/><text class="pill" x="12" y="20" fill="#fee2e2">3 · rate caps (day+hour)</text></g>
+        <g transform="translate(200,40)"><rect width="190" height="30" rx="6" fill="#7f1d1d" opacity="0.6"/><text class="pill" x="12" y="20" fill="#fee2e2">4 · cooldowns (per-target)</text></g>
+        <g transform="translate(0,80)"><rect width="190" height="30" rx="6" fill="#7f1d1d" opacity="0.6"/><text class="pill" x="12" y="20" fill="#fee2e2">5 · relevance ≥ 0.65</text></g>
+        <g transform="translate(200,80)"><rect width="190" height="30" rx="6" fill="#7f1d1d" opacity="0.6"/><text class="pill" x="12" y="20" fill="#fee2e2">6 · duplicate cos &lt; 0.85 (7d)</text></g>
+        <g transform="translate(0,120)"><rect width="190" height="30" rx="6" fill="#7f1d1d" opacity="0.6"/><text class="pill" x="12" y="20" fill="#fee2e2">7 · diversity (cluster/kind)</text></g>
+        <g transform="translate(200,120)"><rect width="190" height="30" rx="6" fill="#7f1d1d" opacity="0.6"/><text class="pill" x="12" y="20" fill="#fee2e2">8 · dm mutual required</text></g>
+        <g transform="translate(100,165)"><rect width="190" height="30" rx="6" fill="#4a044e" opacity="0.7"/><text class="pill" x="12" y="20" fill="#fbcfe8">+ human_review check</text></g>
+      </g>
+
+      <rect x="18" y="298" width="384" height="66" rx="10" fill="#0b1220" stroke="#991b1b"/>
+      <text class="card-kicker" x="30" y="318" fill="#fca5a5">typestate compile guard</text>
+      <text class="mono" x="30" y="338" fill="#fecaca">Actor signature: Candidate&lt;"approved"&gt;</text>
+      <text class="mono" x="30" y="354" fill="#fecaca">only policy/index.ts calls __unsafeMarkApproved</text>
+    </g>
+
+    <!-- ACTOR -->
+    <g transform="translate(1420,80)">
+      <rect width="420" height="380" rx="16" fill="url(#loopAmber)" stroke="#f59e0b" stroke-opacity="0.6"/>
+      <text class="card-kicker" x="18" y="28" fill="#fde68a">actor</text>
+      <text class="card-title" x="18" y="56" fill="#fef3c7">event-driven · shadow/gated/live</text>
+      <text class="card-body" x="18" y="82" fill="#fde68a">accepts only Candidate&lt;approved&gt;</text>
+
+      <rect x="18" y="100" width="384" height="88" rx="10" fill="#0b1220" stroke="#78350f"/>
+      <text class="card-kicker" x="30" y="120" fill="#fbbf24">1 · idempotency (SHA-256)</text>
+      <text class="mono" x="30" y="140" fill="#fde68a">normalize(text) + in_reply_to_tweet_id +</text>
+      <text class="mono" x="30" y="156" fill="#fde68a">quote_tweet_id + sorted(media_ids)</text>
+      <text class="mono-dim" x="30" y="176" fill="#92400e">X has no idempotency header → this is the guard</text>
+
+      <rect x="18" y="200" width="384" height="88" rx="10" fill="#0b1220" stroke="#78350f"/>
+      <text class="card-kicker" x="30" y="220" fill="#fbbf24">2 · dispatch per action.kind</text>
+      <text class="mono" x="30" y="240" fill="#fde68a">like · bookmark · post · reply · quote · dm</text>
+      <text class="mono" x="30" y="256" fill="#fde68a">follow · unfollow (Pro tier gated)</text>
+      <text class="mono-dim" x="30" y="276" fill="#92400e">project_proposal → Builder queue (NOT X write)</text>
+
+      <rect x="18" y="300" width="384" height="64" rx="10" fill="#0b1220" stroke="#78350f"/>
+      <text class="card-kicker" x="30" y="320" fill="#fbbf24">3 · finalize</text>
+      <text class="mono" x="30" y="340" fill="#fde68a">rate counters++ · cooldown · post_embeddings</text>
+      <text class="mono" x="30" y="356" fill="#fde68a">brain.outcome_annotate(success|failure)</text>
+    </g>
+
+    <!-- CONSOLIDATOR -->
+    <g transform="translate(40,480)">
+      <rect width="840" height="300" rx="16" fill="url(#loopCyan)" stroke="#06b6d4" stroke-opacity="0.6"/>
+      <text class="card-kicker" x="18" y="28" fill="#a5f3fc">consolidator</text>
+      <text class="card-title" x="18" y="56" fill="#cffafe">submit 24 h · poll 30 min · xAI Batch API</text>
+      <text class="card-body" x="18" y="82" fill="#a5f3fc">50 % off all token classes · JSONL upload · brainctl MCP consolidator allowlist</text>
+
+      <g transform="translate(18,100)">
+        <rect width="192" height="180" rx="12" fill="#0b1220" stroke="#155e75"/>
+        <text class="card-kicker" x="14" y="22" fill="#67e8f9">1 · buildJsonl</text>
+        <text class="mono" x="14" y="46" fill="#a5f3fc">dream_cycle</text>
+        <text class="mono" x="14" y="64" fill="#a5f3fc">consolidation_run</text>
+        <text class="mono" x="14" y="82" fill="#a5f3fc">gaps_scan</text>
+        <text class="mono" x="14" y="100" fill="#a5f3fc">retirement_analysis</text>
+        <text class="mono" x="14" y="118" fill="#a5f3fc">reflexion_write</text>
+        <text class="mono-dim" x="14" y="146" fill="#475569">/v1/responses per line</text>
+        <text class="mono-dim" x="14" y="162" fill="#475569">schema: changed, insights,</text>
+        <text class="mono-dim" x="14" y="176" fill="#475569">gaps, retirements</text>
+      </g>
+      <g transform="translate(226,100)">
+        <rect width="192" height="180" rx="12" fill="#0b1220" stroke="#155e75"/>
+        <text class="card-kicker" x="14" y="22" fill="#67e8f9">2 · submit</text>
+        <text class="mono" x="14" y="46" fill="#a5f3fc">grokFilesUpload</text>
+        <text class="mono" x="14" y="64" fill="#a5f3fc">→ file_id</text>
+        <text class="mono" x="14" y="88" fill="#a5f3fc">grokBatchCreate</text>
+        <text class="mono-dim" x="14" y="104" fill="#64748b">endpoint: /v1/responses</text>
+        <text class="mono-dim" x="14" y="118" fill="#64748b">completion_window: 24h</text>
+        <text class="mono" x="14" y="146" fill="#a5f3fc">INSERT consolidator_runs</text>
+        <text class="mono" x="14" y="162" fill="#a5f3fc">status='queued'</text>
+      </g>
+      <g transform="translate(434,100)">
+        <rect width="192" height="180" rx="12" fill="#0b1220" stroke="#155e75"/>
+        <text class="card-kicker" x="14" y="22" fill="#67e8f9">3 · poll (30 min)</text>
+        <text class="mono" x="14" y="46" fill="#a5f3fc">grokBatchGet(id)</text>
+        <text class="mono" x="14" y="70" fill="#a5f3fc">in_progress → update</text>
+        <text class="mono" x="14" y="88" fill="#a5f3fc">completed → stream</text>
+        <text class="mono" x="14" y="106" fill="#a5f3fc">failed → alert</text>
+        <text class="mono-dim" x="14" y="130" fill="#64748b">grokBatchResults(id)</text>
+        <text class="mono-dim" x="14" y="146" fill="#64748b">async iter over JSONL</text>
+        <text class="warn" x="14" y="170">⚠ NOT YET WIRED</text>
+      </g>
+      <g transform="translate(642,100)">
+        <rect width="180" height="180" rx="12" fill="#0b1220" stroke="#155e75"/>
+        <text class="card-kicker" x="14" y="22" fill="#67e8f9">4 · aggregate</text>
+        <text class="mono" x="14" y="46" fill="#a5f3fc">{ changed[],</text>
+        <text class="mono" x="14" y="62" fill="#a5f3fc">  insights[],</text>
+        <text class="mono" x="14" y="78" fill="#a5f3fc">  gaps[],</text>
+        <text class="mono" x="14" y="94" fill="#a5f3fc">  retirements[],</text>
+        <text class="mono" x="14" y="110" fill="#a5f3fc">  failed_tasks[] }</text>
+        <text class="mono-dim" x="14" y="140" fill="#64748b">UPDATE summary_json</text>
+        <text class="mono-dim" x="14" y="156" fill="#64748b">completed_at=now()</text>
+      </g>
+    </g>
+
+    <!-- SQLITE OPS STORE -->
+    <g transform="translate(920,480)">
+      <rect width="920" height="300" rx="16" fill="url(#store)" stroke="#14b8a6" stroke-opacity="0.6"/>
+      <text class="card-kicker" x="18" y="28" fill="#99f6e4">sqlite · ops store · src/db/schema.sql</text>
+      <text class="card-title" x="18" y="56" fill="#ccfbf1">brain.db owns the semantic layer · strand.db is audit + ops</text>
+
+      <g transform="translate(18,80)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#99f6e4">
+        <g><rect width="280" height="26" rx="6" fill="#134e4a"/><text x="14" y="18">action_log · idempotency_key UNIQUE</text></g>
+        <g transform="translate(296,0)"><rect width="280" height="26" rx="6" fill="#134e4a"/><text x="14" y="18">cooldowns · scope+kind PK</text></g>
+        <g transform="translate(592,0)"><rect width="288" height="26" rx="6" fill="#134e4a"/><text x="14" y="18">human_review_queue · decision_id UK</text></g>
+
+        <g transform="translate(0,36)"><rect width="280" height="26" rx="6" fill="#134e4a"/><text x="14" y="18">reasoner_runs · tick_at idx</text></g>
+        <g transform="translate(296,36)"><rect width="280" height="26" rx="6" fill="#134e4a"/><text x="14" y="18">consolidator_runs · batch_id</text></g>
+        <g transform="translate(592,36)"><rect width="288" height="26" rx="6" fill="#134e4a"/><text x="14" y="18">post_embeddings · 7d dup window</text></g>
+
+        <g transform="translate(0,72)"><rect width="280" height="26" rx="6" fill="#134e4a"/><text x="14" y="18">perceived_events · forwarded_to_brain</text></g>
+        <g transform="translate(296,72)"><rect width="280" height="26" rx="6" fill="#134e4a"/><text x="14" y="18">rate_counters · scope+kind+window</text></g>
+        <g transform="translate(592,72)"><rect width="288" height="26" rx="6" fill="#134e4a"/><text x="14" y="18">dlq · queue · attempts</text></g>
+      </g>
+
+      <rect x="18" y="200" width="880" height="80" rx="10" fill="#042f2e" stroke="#115e59"/>
+      <text class="card-kicker" x="30" y="222" fill="#5eead4">circuit breakers</text>
+      <text class="mono" x="30" y="244" fill="#99f6e4">X 429 → halt 1h · 429 UsageCapExceeded → halt 24h · 403 automated_behavior → read-only + page operator</text>
+      <text class="mono" x="30" y="262" fill="#99f6e4">sentiment &gt; 2σ negative → halt outreach · grokCall throw → empty tick · embedder load fail → refuse every call</text>
+    </g>
+  </g>
+
+  <!-- ARROWS: external -> loops -->
+  <!-- X -> Perceiver -->
+  <g>
+    <path d="M 350 380 C 350 420 240 430 240 500" stroke="#38bdf8" stroke-width="2.5" fill="none" marker-end="url(#arrowSky)"/>
+    <text class="arrow-label" x="260" y="420">mentions · TL · DMs</text>
+    <text class="arrow-sub" x="260" y="436">GET /2/users/:id/*</text>
+  </g>
+  <!-- xAI -> Reasoner -->
+  <g>
+    <path d="M 930 380 C 930 440 700 440 700 500" stroke="#c084fc" stroke-width="2.5" fill="none" marker-end="url(#arrowPurple)"/>
+    <text class="arrow-label" x="720" y="420">POST /v1/responses</text>
+    <text class="arrow-sub" x="720" y="436">structured output · MCP</text>
+  </g>
+  <!-- xAI -> Consolidator -->
+  <g>
+    <path d="M 1100 380 C 1100 870 520 870 460 870" stroke="#c084fc" stroke-width="2.5" fill="none" marker-end="url(#arrowPurple)" stroke-dasharray="6 4"/>
+    <text class="arrow-label" x="1100" y="700" text-anchor="middle">Batch API (50 % off)</text>
+    <text class="arrow-sub" x="1100" y="716" text-anchor="middle">/v1/files · /v1/batches</text>
+  </g>
+  <!-- brainctl -> Reasoner (bidirectional via MCP) -->
+  <g>
+    <path d="M 1560 380 C 1560 440 820 460 820 500" stroke="#10b981" stroke-width="2.5" fill="none" marker-end="url(#arrowGreen)"/>
+    <text class="arrow-label" x="1560" y="420" text-anchor="end">MCP read allowlist</text>
+    <text class="arrow-sub" x="1560" y="436" text-anchor="end">memory_search · entity_get · ...</text>
+  </g>
+  <!-- brainctl -> Consolidator -->
+  <g>
+    <path d="M 1580 380 C 1580 870 900 870 880 860" stroke="#10b981" stroke-width="2.2" fill="none" marker-end="url(#arrowGreen)" stroke-dasharray="4 4"/>
+  </g>
+
+  <!-- Internal flow arrows -->
+  <!-- Perceiver -> SQL -->
+  <g>
+    <path d="M 400 660 L 940 660" stroke="#94a3b8" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+    <text class="arrow-label" x="670" y="650" text-anchor="middle">perceived_events INSERT</text>
+    <text class="arrow-sub" x="670" y="668" text-anchor="middle">brain.event_add (TS direct)</text>
+  </g>
+
+  <!-- SQL -> Reasoner -->
+  <g>
+    <path d="M 940 640 C 700 640 700 610 700 580" stroke="#94a3b8" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+    <text class="arrow-label" x="700" y="630" text-anchor="middle">SELECT last 50 events</text>
+  </g>
+
+  <!-- Reasoner -> Gate -->
+  <g>
+    <path d="M 940 680 L 1000 680" stroke="#a78bfa" stroke-width="3" fill="none" marker-end="url(#arrowPurple)"/>
+    <text class="arrow-label" x="970" y="670" text-anchor="middle">CandidateEnvelope[]</text>
+  </g>
+
+  <!-- Gate -> Actor -->
+  <g>
+    <path d="M 1420 680 L 1480 680" stroke="#f87171" stroke-width="3" fill="none" marker-end="url(#arrowRed)"/>
+    <text class="arrow-label" x="1450" y="670" text-anchor="middle">Candidate&lt;approved&gt;</text>
+  </g>
+
+  <!-- Gate -> rejected -> SQL (action_log) -->
+  <g>
+    <path d="M 1200 860 C 1200 940 1260 960 1390 960" stroke="#f87171" stroke-width="2" fill="none" marker-end="url(#arrowRed)" stroke-dasharray="6 4"/>
+    <text class="arrow-label" x="1200" y="940" text-anchor="middle">rejected → action_log</text>
+    <text class="arrow-sub" x="1200" y="956" text-anchor="middle">+ reasons[] + ruleIds[]</text>
+  </g>
+
+  <!-- Actor -> X writes -->
+  <g>
+    <path d="M 1630 820 C 1630 940 350 380 350 380" stroke="#38bdf8" stroke-width="2" fill="none" stroke-dasharray="6 4"/>
+    <path d="M 1630 820 C 1900 820 1900 380 350 380" stroke="#38bdf8" stroke-width="2" fill="none" marker-end="url(#arrowSky)"/>
+    <text class="arrow-label" x="1870" y="600">X writes</text>
+    <text class="arrow-sub" x="1870" y="616">POST /2/tweets etc.</text>
+  </g>
+
+  <!-- FOOTER: legend + phase gates -->
+  <g transform="translate(60,1260)">
+    <text class="zone">phase gate · what's wired · what's next</text>
+    <g transform="translate(0,20)">
+      <rect width="600" height="200" rx="16" fill="#0f172a" stroke="#1e293b"/>
+      <text class="card-kicker" x="24" y="30" fill="#34d399">✓ wired (main)</text>
+      <text class="card-body" x="24" y="54">typestate gate · reasoner schema + cache key + chaining</text>
+      <text class="card-body" x="24" y="74">consolidator batch submit + poll helpers · brainctl r/w</text>
+      <text class="card-body" x="24" y="94">prefilter (regex + topic + embedding) · grokCompose util</text>
+      <text class="card-body" x="24" y="114">replay-shadow regression tool · 84 tests green</text>
+      <text class="card-body" x="24" y="134">smoke: perceive seed → reason → gate → log (254 ms)</text>
+      <text class="mono-dim" x="24" y="170" fill="#475569">commit: github.com/TSchonleber/strand@main</text>
+    </g>
+    <g transform="translate(640,20)">
+      <rect width="600" height="200" rx="16" fill="#0f172a" stroke="#1e293b"/>
+      <text class="card-kicker" x="24" y="30" fill="#f59e0b">⟳ next</text>
+      <text class="card-body" x="24" y="54">wire consolidatorPoll into orchestrator (30 min cron)</text>
+      <text class="card-body" x="24" y="74">phase 3: 48 h perceiver on real X creds</text>
+      <text class="card-body" x="24" y="94">label 100 candidates · ≥ 80 % shadow-reasoner agreement</text>
+      <text class="card-body" x="24" y="114">phase 4+: composer opt-in (config.composer.twoStage)</text>
+      <text class="card-body" x="24" y="134">phase 7: Pro tier upgrade → follow variant live</text>
+    </g>
+    <g transform="translate(1280,20)">
+      <rect width="600" height="200" rx="16" fill="#0f172a" stroke="#1e293b"/>
+      <text class="card-kicker" x="24" y="30" fill="#fca5a5">✕ never</text>
+      <text class="card-body" x="24" y="54">DMs to non-mutuals — compile-error-level rule</text>
+      <text class="card-body" x="24" y="74">action bypassing the policy gate (typestate guard)</text>
+      <text class="card-body" x="24" y="94">brainctl mutations via Grok MCP (READ allowlist only)</text>
+      <text class="card-body" x="24" y="114">prompts as inline strings — file-hashed at load</text>
+      <text class="card-body" x="24" y="134">deferred completions for consolidator (Batch API only)</text>
+    </g>
+  </g>
+</svg>
