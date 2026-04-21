@@ -1,5 +1,6 @@
 import { GROK_READ_TOOLS } from "@/clients/brain";
-import { type GrokTool, brainctlMcpTool, grokCall } from "@/clients/grok";
+import { llm } from "@/clients/llm";
+import type { LlmCall, LlmResult, LlmTool } from "@/clients/llm";
 import { env, persona } from "@/config";
 import { db } from "@/db";
 import { loadPrompt } from "@/prompts";
@@ -184,16 +185,28 @@ export async function reasonerTick(): Promise<CandidateEnvelope[]> {
   const personaPrompt = loadPrompt("persona");
   const reasonerPrompt = loadPrompt("reasoner.system");
 
-  const tools: GrokTool[] = [{ type: "x_search" }, { type: "web_search" }];
+  const provider = llm();
 
-  if (env.BRAINCTL_REMOTE_MCP_URL) {
-    tools.push(
-      brainctlMcpTool({
-        url: env.BRAINCTL_REMOTE_MCP_URL,
-        ...(env.BRAINCTL_REMOTE_MCP_TOKEN ? { token: env.BRAINCTL_REMOTE_MCP_TOKEN } : {}),
-        allowedTools: GROK_READ_TOOLS,
-      }),
-    );
+  // Tools: provider-native server-side tools + MCP. Adapters drop what they
+  // don't support (e.g., OpenAI Chat Completions drops x_search; Gemini drops mcp).
+  const tools: LlmTool[] = [];
+  for (const serverTool of provider.capabilities.serverSideTools) {
+    if (serverTool === "x_search" || serverTool === "web_search") {
+      tools.push({ type: serverTool });
+    }
+  }
+
+  if (provider.capabilities.mcp && env.BRAINCTL_REMOTE_MCP_URL) {
+    tools.push({
+      type: "mcp",
+      server_label: "brainctl",
+      server_description: "Strand long-term memory",
+      server_url: env.BRAINCTL_REMOTE_MCP_URL,
+      ...(env.BRAINCTL_REMOTE_MCP_TOKEN
+        ? { authorization: `Bearer ${env.BRAINCTL_REMOTE_MCP_TOKEN}` }
+        : {}),
+      allowed_tools: [...GROK_READ_TOOLS],
+    });
   }
 
   const userInput = JSON.stringify({
@@ -217,24 +230,28 @@ export async function reasonerTick(): Promise<CandidateEnvelope[]> {
     `# prompt_versions: persona=${personaPrompt.hash} reasoner=${reasonerPrompt.hash}`,
   ];
 
-  let result: Awaited<ReturnType<typeof grokCall<{ candidates: unknown[] }>>>;
+  const baseCall: LlmCall = {
+    model: env.LLM_MODEL_REASONER,
+    messages: [
+      ...systemPrompts.map((content) => ({ role: "system" as const, content })),
+      { role: "user" as const, content: userInput },
+    ],
+    tools,
+    parallelToolCalls: true,
+    maxTurns: MAX_TURNS,
+    include: ["mcp_call_output", "reasoning.encrypted_content", "x_search_call.action.sources"],
+    promptCacheKey: PROMPT_CACHE_KEY,
+    structuredOutput: {
+      name: "CandidateBatch",
+      schema: CANDIDATE_BATCH_SCHEMA as unknown as Record<string, unknown>,
+      strict: true,
+    },
+    maxOutputTokens: MAX_OUTPUT_TOKENS,
+  };
+
+  let result: LlmResult<{ candidates: unknown[] }>;
   try {
-    result = await grokCall<{ candidates: unknown[] }>({
-      model: env.GROK_MODEL_REASONER,
-      systemPrompts,
-      userInput,
-      tools,
-      parallelToolCalls: true,
-      maxTurns: MAX_TURNS,
-      include: ["mcp_call_output", "reasoning.encrypted_content", "x_search_call.action.sources"],
-      promptCacheKey: PROMPT_CACHE_KEY,
-      responseSchema: {
-        name: "CandidateBatch",
-        schema: CANDIDATE_BATCH_SCHEMA as unknown as Record<string, unknown>,
-        strict: true,
-      },
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
-    });
+    result = await provider.chat<{ candidates: unknown[] }>(baseCall);
   } catch (err) {
     log.error({ err, durationMs: Date.now() - t0 }, "reasoner.call_failed");
     return [];
@@ -247,31 +264,27 @@ export async function reasonerTick(): Promise<CandidateEnvelope[]> {
   let usage = result.usage;
   let stuck = false;
 
-  // Stuck mid-thought: Grok used tools but produced no candidates. Chain
-  // once via previous_response_id to let it finish. Cost-bounded: one retry.
-  if (parsedCandidates.length === 0 && toolCallCount > 0) {
+  // Stuck mid-thought: provider used tools but produced no candidates. Chain
+  // once via previous_response_id to let it finish. Only if the provider
+  // supports stored conversations (xAI, OpenAI Responses). Others skip.
+  if (
+    parsedCandidates.length === 0 &&
+    toolCallCount > 0 &&
+    provider.capabilities.previousResponseId
+  ) {
     stuck = true;
     log.info(
       { response_id: responseId, tool_calls: toolCallCount },
       "reasoner.stuck_mid_thought.retry",
     );
     try {
-      const retry = await grokCall<{ candidates: unknown[] }>({
-        model: env.GROK_MODEL_REASONER,
-        systemPrompts,
-        userInput: "Continue. Emit the final CandidateBatch JSON now.",
-        tools,
-        parallelToolCalls: true,
-        maxTurns: MAX_TURNS,
-        include: ["mcp_call_output", "reasoning.encrypted_content", "x_search_call.action.sources"],
-        promptCacheKey: PROMPT_CACHE_KEY,
+      const retry = await provider.chat<{ candidates: unknown[] }>({
+        ...baseCall,
+        messages: [
+          ...systemPrompts.map((content) => ({ role: "system" as const, content })),
+          { role: "user" as const, content: "Continue. Emit the final CandidateBatch JSON now." },
+        ],
         previousResponseId: responseId,
-        responseSchema: {
-          name: "CandidateBatch",
-          schema: CANDIDATE_BATCH_SCHEMA as unknown as Record<string, unknown>,
-          strict: true,
-        },
-        maxOutputTokens: MAX_OUTPUT_TOKENS,
       });
       parsedCandidates = (retry.parsed?.candidates ?? []) as unknown[];
       previousResponseId = responseId;

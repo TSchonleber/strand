@@ -117,7 +117,7 @@ function buildJsonl(): string {
   const lines: string[] = [];
   for (const task of TASKS) {
     const callInput: GrokCallInput = {
-      model: env.GROK_MODEL_REASONER,
+      model: env.LLM_MODEL_REASONER,
       systemPrompts: [
         `# consolidator\n${prompt.content}`,
         `# prompt_versions: consolidator=${prompt.hash}`,

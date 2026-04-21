@@ -15,7 +15,7 @@ vars: {
 
 title: |md
 # Strand — agent harness
-four loops · typestate policy gate · brainctl memory · xAI Grok reasoning
+provider-agnostic LLM · typestate policy gate · brainctl memory · 4 loops · SQLite ops store
 | {
   near: top-center
   shape: text
@@ -32,50 +32,41 @@ external: External services {
     shape: cloud
     tooltip: "OAuth 2.0 PKCE · Basic tier 10k posts/mo · no follow endpoint · refresh tokens rotate every call"
   }
-  x-endpoints: |md
-    **reads** `GET /2/users/:id/mentions`
-    `GET /2/timelines/reverse_chronological`
-    `GET /2/dm_events`
 
-    **writes** `POST /2/tweets` (no idempotency header)
-    `POST /2/users/:id/likes`
-    `POST /2/dm_conversations/with/:id/messages`
-  | {
-    shape: text
-    style.font-size: 12
-  }
-  x -- x-endpoints {
-    style.stroke-dash: 2
-    style.opacity: 0.6
-  }
-
-  xai: xAI Responses API {
+  llm: LLM provider {
     shape: cloud
-    tooltip: "grok-4.20-reasoning · grok-4-1-fast-non-reasoning · refusal tax 0.05 USD/req (pre-filter locally)"
+    style.fill: "#4c1d95"
+    style.stroke: "#a78bfa"
+    tooltip: "Adapter selected by LLM_PROVIDER env. xAI · OpenAI-compatible · Anthropic · Gemini. Each declares capabilities — loops degrade gracefully on missing features."
   }
-  xai-endpoints: |md
-    `POST /v1/responses` · sync reasoning
-    `POST /v1/files` · JSONL upload
-    `POST /v1/batches` · async · 50% off
 
-    `max_turns: 5`
-    `prompt_cache_key` per loop+tenant
-    `include: [mcp_call_output, reasoning.enc, x_search.sources]`
+  llm-adapters: |md
+    **4 adapters · one LlmProvider interface**
+    `src/clients/llm/{openai,anthropic,xai,gemini}.ts`
+
+    — **xai** · grok-4.20-reasoning
+      x_search · web_search · MCP · Batch · cache · prev_response_id
+    — **openai-compat** · gpt-5 / Ollama / Groq / Together
+      Chat Completions · Batch · auto cache
+    — **anthropic** · claude-opus-4-7
+      messages · web_search · MCP · cache_control
+    — **gemini** · gemini-2.5-pro
+      google_search · code_execution · auto cache
   | {
     shape: text
-    style.font-size: 12
+    style.font-size: 11
   }
-  xai -- xai-endpoints {
+  llm -- llm-adapters {
     style.stroke-dash: 2
     style.opacity: 0.6
   }
 
   brain: brainctl {
     shape: cylinder
-    tooltip: "Dual surface: remote MCP (HTTP/SSE) for Grok with READ allowlist · local stdio MCP for TS-direct writes"
+    tooltip: "Dual surface: remote MCP (HTTP/SSE) for the LLM provider with READ allowlist · local stdio MCP for TS-direct writes"
   }
   brain-tools: |md
-    **READ allowlist (Grok)**
+    **READ allowlist (LLM)**
     `memory_search` · `entity_get` · `entity_search`
     `context_search` · `tom_perspective_get`
     `policy_match` · `reason` · `temporal_*`
@@ -87,10 +78,10 @@ external: External services {
 
     **NEVER exposed**
     `memory_add` · `entity_create` · `event_add`
-    `belief_set` · `policy_add` · `trust_*` · `backup`
+    `belief_set` · `policy_add` · `trust_*`
   | {
     shape: text
-    style.font-size: 12
+    style.font-size: 11
   }
   brain -- brain-tools {
     style.stroke-dash: 2
@@ -103,9 +94,23 @@ external: External services {
 strand: strand process {
   style.stroke: "#3b82f6"
   style.stroke-width: 2
-  tooltip: "src/orchestrator.ts — in-process intervals (dev) · BullMQ per loop (prod)"
+  tooltip: "src/orchestrator.ts — in-process intervals (dev) · migrate to a queue when prod needs it"
 
-  # ─── perceiver ───
+  factory: |md
+    ## llm() factory
+    `src/clients/llm/index.ts`
+
+    singleton switch on `LLM_PROVIDER`
+    validates per-provider API key
+    logs capabilities at boot
+    tests: `_resetLlmForTests()`
+  | {
+    shape: rectangle
+    style.fill: "#1e293b"
+    style.stroke: "#a78bfa"
+    style.font-color: "#ede9fe"
+  }
+
   perceiver: |md
     ## Perceiver
     **every 120 s**
@@ -114,7 +119,7 @@ strand: strand process {
     • own mentions (sinceId)
     • home timeline
     • DM events
-    • NO external scouting (Grok owns x_search)
+    • NO external scouting
   | {
     shape: rectangle
     style.fill: "#1e3a8a"
@@ -122,22 +127,21 @@ strand: strand process {
     style.font-color: "#dbeafe"
   }
 
-  # ─── reasoner ───
   reasoner: |md
     ## Reasoner
-    **every 300 s · grok-4.20-reasoning**
+    **every 300 s · provider-agnostic**
     src/loops/reasoner.ts
 
     reads last 50 `perceived_events`
     emits up to 10 `CandidateEnvelope[]`
 
+    `llm().chat({ messages, tools, structuredOutput })`
     `promptCacheKey: strand:reasoner:v1`
-    `maxTurns: 5` · `parallelToolCalls`
-    tools: x_search · web_search · brainctl MCP
+    `maxTurns: 5` · tools from `capabilities.serverSideTools`
     schema: `anyOf` per action.kind
 
     stuck-mid-thought → retry with
-    `previous_response_id`
+    `previousResponseId` (when supported)
   | {
     shape: rectangle
     style.fill: "#4c1d95"
@@ -145,7 +149,6 @@ strand: strand process {
     style.font-color: "#ede9fe"
   }
 
-  # ─── gate ───
   gate: |md
     ## Policy Gate
     **8 rules · typestate**
@@ -161,7 +164,6 @@ strand: strand process {
     + human_review
 
     mints `Candidate<"approved">`
-    (Actor signature rejects anything else)
   | {
     shape: hexagon
     style.fill: "#7f1d1d"
@@ -171,7 +173,6 @@ strand: strand process {
     style.bold: true
   }
 
-  # ─── actor ───
   actor: |md
     ## Actor
     **event-driven · shadow/gated/live**
@@ -180,7 +181,6 @@ strand: strand process {
     accepts only `Candidate<"approved">`
 
     1. SHA-256 idempotency
-       `normalize(text) + reply_to + quote_id + media`
     2. dispatch per action.kind
        like · bookmark · post · reply · quote · dm
        follow/unfollow (Pro gated)
@@ -193,21 +193,17 @@ strand: strand process {
     style.font-color: "#fef3c7"
   }
 
-  # ─── consolidator ───
   consolidator: |md
     ## Consolidator
     **submit 24 h · poll 30 min**
     _poll not yet wired_
 
-    xAI Batch API · 50% off
+    5 task JSONL via llm.filesUpload → batchCreate
+    _if `capabilities.batch` — else sync fallback_
 
-    JSONL: dream_cycle · consolidation_run
+    tasks: dream_cycle · consolidation_run
     gaps_scan · retirement_analysis
     reflexion_write
-
-    `grokFilesUpload` → `grokBatchCreate`
-    → `consolidator_runs` status=queued
-    poll → aggregate summary_json
   | {
     shape: rectangle
     style.fill: "#083344"
@@ -215,7 +211,6 @@ strand: strand process {
     style.font-color: "#cffafe"
   }
 
-  # ─── sqlite ───
   sqlite: |md
     ## SQLite ops store
     src/db/schema.sql
@@ -236,22 +231,14 @@ strand: strand process {
     style.font-color: "#ccfbf1"
   }
 
-  # ─── intra edges ───
+  # intra edges
+  factory -> reasoner: "llm()" { style.stroke: "#a78bfa" }
+  factory -> consolidator: "llm() + hasBatch()" { style.stroke: "#a78bfa" }
   perceiver -> sqlite: "INSERT perceived_events"
   sqlite -> reasoner: "SELECT last 50 events" { style.stroke-dash: 3 }
-  reasoner -> gate: "CandidateEnvelope[]" {
-    style.stroke: "#a78bfa"
-    style.stroke-width: 2
-  }
-  gate -> actor: "Candidate<approved>" {
-    style.stroke: "#10b981"
-    style.stroke-width: 3
-    style.bold: true
-  }
-  gate -> sqlite: "rejected → action_log + reasons[]" {
-    style.stroke: "#f87171"
-    style.stroke-dash: 3
-  }
+  reasoner -> gate: "CandidateEnvelope[]" { style.stroke: "#a78bfa"; style.stroke-width: 2 }
+  gate -> actor: "Candidate<approved>" { style.stroke: "#10b981"; style.stroke-width: 3; style.bold: true }
+  gate -> sqlite: "rejected → action_log + reasons[]" { style.stroke: "#f87171"; style.stroke-dash: 3 }
   actor -> sqlite: "action_log + rate_counters"
   reasoner -> sqlite: "reasoner_runs"
   consolidator -> sqlite: "consolidator_runs"
@@ -259,39 +246,14 @@ strand: strand process {
 
 # ═════════════════════ External ↔ Strand ═════════════════════
 
-external.x -> strand.perceiver: "poll" {
-  style.stroke: "#38bdf8"
-  style.stroke-width: 2
-}
-strand.actor -> external.x: "writes" {
-  style.stroke: "#38bdf8"
-  style.stroke-width: 3
-  style.bold: true
-}
-external.xai -> strand.reasoner: "/v1/responses" {
-  style.stroke: "#c084fc"
-  style.stroke-width: 2
-}
-external.xai -> strand.consolidator: "Batch API" {
-  style.stroke: "#c084fc"
-  style.stroke-dash: 4
-}
-external.brain -> strand.reasoner: "MCP read" {
-  style.stroke: "#10b981"
-  style.stroke-width: 2
-}
-external.brain -> strand.consolidator: "MCP read + consolidation" {
-  style.stroke: "#10b981"
-  style.stroke-dash: 4
-}
-strand.perceiver -> external.brain: "event_add" {
-  style.stroke: "#10b981"
-  style.stroke-dash: 2
-}
-strand.actor -> external.brain: "outcome_annotate" {
-  style.stroke: "#10b981"
-  style.stroke-dash: 2
-}
+external.x -> strand.perceiver: "poll" { style.stroke: "#38bdf8"; style.stroke-width: 2 }
+strand.actor -> external.x: "writes" { style.stroke: "#38bdf8"; style.stroke-width: 3; style.bold: true }
+external.llm -> strand.factory: "provider.chat()" { style.stroke: "#c084fc"; style.stroke-width: 2 }
+external.llm -> strand.factory: "provider.batch*()" { style.stroke: "#c084fc"; style.stroke-dash: 4 }
+external.brain -> strand.reasoner: "MCP read" { style.stroke: "#10b981"; style.stroke-width: 2 }
+external.brain -> strand.consolidator: "MCP read + consolidation" { style.stroke: "#10b981"; style.stroke-dash: 4 }
+strand.perceiver -> external.brain: "event_add" { style.stroke: "#10b981"; style.stroke-dash: 2 }
+strand.actor -> external.brain: "outcome_annotate" { style.stroke: "#10b981"; style.stroke-dash: 2 }
 
 # ═════════════════════ Phase status ═════════════════════
 
@@ -302,14 +264,13 @@ status: Phase status {
 
   wired: |md
     ### ✓ wired on main
-    • typestate gate
-    • reasoner schema + cache key + chaining
-    • consolidator Batch submit + poll helpers
-    • brainctl r/w surface
-    • prefilter (regex + topic + embedding)
-    • `grokCompose` library
-    • `replay-shadow` regression tool
-    • 84 tests green · smoke 254 ms
+    • typestate gate · reasoner schema + cache key + chaining
+    • 4 adapters: openai-compat · anthropic · xai · gemini
+    • `llm()` factory with capability-driven feature toggles
+    • consolidator Batch (xAI + OpenAI) with sync fallback
+    • brainctl r/w · prefilter (regex + topic + embedding)
+    • `grokCompose` library · `replay-shadow` regression tool
+    • 123 tests · smoke 269 ms · 0 typecheck errors
   | {
     shape: rectangle
     style.fill: "#064e3b"
@@ -320,10 +281,10 @@ status: Phase status {
   next: |md
     ### ⟳ next
     • wire `consolidatorPoll` into orchestrator
+    • provider-native batch body builder (not just xAI)
+    • multi-turn message history (`GrokCallInput` extension)
     • phase 3: 48 h perceiver on real X creds
-    • label 100 candidates
-    • ≥ 80% shadow agreement
-    • phase 4+: composer opt-in (two-stage)
+    • label 100 candidates · ≥ 80% shadow agreement
     • phase 7: Pro tier → follow variant live
   | {
     shape: rectangle
@@ -336,9 +297,9 @@ status: Phase status {
     ### ✕ never
     • DMs to non-mutuals
     • action bypassing the policy gate
-    • brainctl mutations via Grok MCP
+    • brainctl mutations via remote MCP
     • prompts as inline strings
-    • Deferred Completions for Consolidator
+    • provider-specific leakage outside `src/clients/llm/`
     • follow variant on Basic tier
   | {
     shape: rectangle

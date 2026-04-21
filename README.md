@@ -1,6 +1,8 @@
 # Strand
 
-Autonomous X presence agent. Grok-powered reasoning, brainctl-backed long-term memory, X API for action, typestate-enforced policy gate between them.
+Autonomous X presence agent. Provider-agnostic LLM reasoning (xAI · OpenAI · Anthropic · Gemini), brainctl-backed long-term memory, X API for action, typestate-enforced policy gate between them.
+
+Pick a provider with `LLM_PROVIDER` in `.env`. Loops call `llm().chat()` — adapters translate to each provider's native wire format and declare capabilities (structured output, MCP, server-side tools, batch, prompt caching) so features degrade gracefully where unsupported.
 
 ## Architecture
 
@@ -47,11 +49,11 @@ Start in `shadow` until 100 candidates reviewed and ≥80% agree with your manua
 ## Stack
 
 - **TypeScript** strict
-- **xAI Grok** via Responses API (OpenAI SDK with `baseURL` override) — `grok-4.20-reasoning` (dated `grok-4.20-0309-reasoning` in prod) for reasoning/consolidation, `grok-4-1-fast-non-reasoning` for composition/judging
-- **brainctl** as remote MCP — Grok pulls memory directly
-- **X API v2** — own-timeline reads + all writes only; external scouting goes through Grok's `x_search`
+- **LLM** — pluggable via `LlmProvider` interface at `src/clients/llm/`. Default `xai` (grok-4.20-reasoning). Ship-time adapters: `openai` (+ Ollama, Groq, Together, LM Studio via baseURL), `anthropic` (claude-opus-4-7), `gemini` (gemini-2.5-pro). Switch with `LLM_PROVIDER` env
+- **brainctl** as remote MCP — LLM pulls memory directly (where the provider supports MCP)
+- **X API v2** — own-timeline reads + all writes only; external scouting via provider-native tools where available (xAI `x_search`, Anthropic `web_search`, Gemini `google_search`)
 - **SQLite** for action log, idempotency, rate counters
-- **BullMQ/Redis** in prod, in-process intervals in dev
+- In-process intervals in dev; scheduler TBD when prod needs it
 
 ## Non-negotiable
 

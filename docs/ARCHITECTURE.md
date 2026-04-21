@@ -4,6 +4,14 @@ Authoritative technical map of the Strand agent harness. Every diagram below
 is grounded in the current source tree at `main`; when code and diagram diverge,
 the code wins and this doc is the bug.
 
+> **Provider-agnostic note (2026-04-21):** Strand now runs on four LLM providers
+> behind the `LlmProvider` interface at `src/clients/llm/`: OpenAI-compatible,
+> Anthropic, xAI, Gemini. Pick with `LLM_PROVIDER` env. The diagrams below
+> reference xAI endpoints by default because it's the Phase-0 default provider
+> and the richest feature set (x_search + Batch + prompt_cache_key +
+> previous_response_id). Swap provider and adapters translate to each native
+> wire format; loops degrade gracefully on missing capabilities.
+
 Scope: runtime architecture, data flow, gate typestate, brainctl access model,
 SQLite schema. Does NOT cover deployment topology (Fly.io), prompt
 engineering details (`prompts/`), or policy tuning heuristics (`config/policies.yaml`).

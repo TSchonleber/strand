@@ -13,11 +13,19 @@ const EnvSchema = z.object({
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
   STRAND_MODE: z.enum(["shadow", "gated", "live"]).default("shadow"),
 
-  XAI_API_KEY: z.string().min(1),
+  // ─── LLM provider (agnostic) ───────────────────────────────
+  LLM_PROVIDER: z.enum(["xai", "openai", "anthropic", "gemini"]).default("xai"),
+  LLM_MODEL_REASONER: z.string().default("grok-4.20-reasoning"),
+  LLM_MODEL_COMPOSER: z.string().default("grok-4-1-fast-non-reasoning"),
+  LLM_MODEL_JUDGE: z.string().default("grok-4-1-fast-non-reasoning"),
+  // Per-provider credentials (factory picks the one matching LLM_PROVIDER)
+  XAI_API_KEY: z.string().optional(),
   XAI_BASE_URL: z.string().url().default("https://api.x.ai/v1"),
-  GROK_MODEL_REASONER: z.string().default("grok-4.20-reasoning"),
-  GROK_MODEL_COMPOSER: z.string().default("grok-4-1-fast-non-reasoning"),
-  GROK_MODEL_JUDGE: z.string().default("grok-4-1-fast-non-reasoning"),
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_BASE_URL: z.string().url().optional(), // override for Ollama / Groq / Together / LM Studio
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_BASE_URL: z.string().url().optional(),
+  GEMINI_API_KEY: z.string().optional(),
 
   X_CLIENT_ID: z.string().min(1),
   X_CLIENT_SECRET: z.string().min(1),

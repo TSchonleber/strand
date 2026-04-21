@@ -32,7 +32,7 @@ function isReasoningModel(model: string): boolean {
 }
 
 const client = new OpenAI({
-  apiKey: env.XAI_API_KEY,
+  apiKey: env.XAI_API_KEY ?? "missing-xai-key",
   baseURL: env.XAI_BASE_URL,
 });
 
@@ -648,7 +648,7 @@ export async function grokCompose(input: GrokComposeInput): Promise<GrokComposeR
   }
 
   const result = await grokCall({
-    model: env.GROK_MODEL_COMPOSER,
+    model: env.LLM_MODEL_COMPOSER,
     systemPrompts: [personaPrompt, composerPrompt],
     userInput: input.contextJson,
     temperature: input.temperature ?? 0.6,
