@@ -42,6 +42,7 @@ Start in `shadow` until 100 candidates reviewed and ≥80% agree with your manua
 - `pnpm status` — last N events + last N actions from local DB
 - `pnpm review` — walk through pending human-review candidates
 - `pnpm shadow:replay` — replay candidate log against current policy for regression
+- `pnpm smoke:shadow` — integration smoke (seeds 3 mentions, mocks xAI via MSW, asserts reasoner→gate cycle)
 
 ## Stack
 
