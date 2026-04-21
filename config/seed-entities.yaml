@@ -1,0 +1,54 @@
+# Must match SeedEntitiesConfigSchema in src/config.ts.
+
+watch_users:
+  - karpathy
+  - simonw
+  - swyx
+  - amasad
+  - danielgross
+  - jxmnop
+  - polynoamial
+  - charles_irl
+  - hwchase17
+  - bindureddy
+  - migtissera
+  - abacaj
+  - erikbryn
+  - natfriedman
+  - willdepue
+  - sama
+  - gdb
+  - miramurati
+  - shaneguML
+  - jeremyphoward
+  - russelljkaplan
+  - eugeneyan
+  - hamelhusain
+  - yoheinakajima
+  - pirroh
+  - mathemagic1an
+
+watch_topics:
+  - agentic systems
+  - tool calling
+  - long-term memory
+  - context engineering
+  - MCP protocol
+  - prompt caching
+  - reasoning models
+  - inference economics
+  - LLM evaluation
+  - AI infrastructure
+  - production LLM systems
+  - Rust systems programming
+  - TypeScript
+  - SQLite at scale
+  - embeddings
+  - retrieval augmented generation
+  - vector databases
+  - fine-tuning
+  - RLHF
+  - constitutional AI
+  - AI safety engineering
+
+banned_users: []

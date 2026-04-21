@@ -1,0 +1,50 @@
+{
+  "name": "strand",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Autonomous X presence agent powered by Grok with brainctl memory",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node --enable-source-maps dist/index.js",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check .",
+    "fmt": "biome format --write .",
+    "oauth:setup": "tsx scripts/oauth-setup.ts",
+    "memory:bootstrap": "tsx scripts/bootstrap-memory.ts",
+    "shadow:replay": "tsx scripts/replay-shadow.ts",
+    "status": "tsx src/cli/status.ts",
+    "review": "tsx src/cli/review.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/xai": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "ai": "^4.0.0",
+    "better-sqlite3": "^11.5.0",
+    "bullmq": "^5.22.0",
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.4.1",
+    "openai": "^4.73.0",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0",
+    "twitter-api-v2": "^1.18.2",
+    "yaml": "^2.6.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.9.0",
+    "msw": "^2.6.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}

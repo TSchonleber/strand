@@ -1,0 +1,41 @@
+# Must match PoliciesConfigSchema in src/config.ts.
+# Values here are the *ceiling*; `effectiveCap` multiplies by ramp_multiplier.
+
+mode: shadow
+ramp_multiplier: 0.25
+
+caps_per_day:
+  posts: 6
+  replies: 40
+  quotes: 3
+  follows: 15
+  unfollows: 10
+  likes: 120
+  bookmarks: 30
+  dms: 8
+
+caps_per_hour:
+  follows: 4
+  replies: 8
+
+cooldowns_minutes:
+  per_target_any: 180
+  follow_after_unfollow_days: 30
+  dm_per_target_days: 14
+
+thresholds:
+  min_relevance_reply: 0.72
+  min_relevance_quote: 0.75
+  min_relevance_dm: 0.80
+  max_reply_cosine_7d: 0.60
+  min_confidence_no_review: 0.70
+
+diversity:
+  max_share_per_cluster: 0.30
+  max_share_per_kind: 0.60
+
+human_review_required:
+  dm: true
+  post: false
+  low_confidence: true
+  new_topic: true

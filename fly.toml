@@ -1,0 +1,31 @@
+app = "strand"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  LOG_LEVEL = "info"
+  STRAND_MODE = "shadow"
+  DATABASE_PATH = "/data/strand.db"
+  X_OAUTH_REDIRECT_URI = "http://localhost:4567/callback"
+
+[[mounts]]
+  source = "strand_data"
+  destination = "/data"
+  initial_size = "1gb"
+
+[processes]
+  app = "node --enable-source-maps dist/index.js"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[[restart]]
+  policy = "on-failure"
+  max_retries = 10
+
+# No HTTP service — Strand is a background worker. No [[services]] block.
+# If we add /health later, expose it and add a tcp_check here.
