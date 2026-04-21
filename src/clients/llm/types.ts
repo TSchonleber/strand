@@ -14,11 +14,25 @@
 
 export type LlmRole = "system" | "user" | "assistant" | "tool";
 
+/**
+ * A message in the conversation. Supports true multi-turn with tool calls:
+ *
+ *   { role: "user", content: "..." }
+ *   { role: "assistant", content: "I'll check.", toolCalls: [{id, name, args}] }
+ *   { role: "tool", toolCallId: "...", content: "<tool output>" }
+ *   { role: "assistant", content: "Here's what I found: ..." }
+ *
+ * Adapters translate this linear form to each provider's native shape
+ * (Chat Completions flat list, Anthropic content blocks, Gemini "parts").
+ */
 export interface LlmMessage {
   role: LlmRole;
   content: string;
   name?: string;
+  /** For role: "tool" — which toolCall this is responding to. */
   toolCallId?: string;
+  /** For role: "assistant" — tool calls the assistant wants to make next. */
+  toolCalls?: LlmToolCall[];
 }
 
 export interface LlmStructuredOutput {
@@ -59,7 +73,23 @@ export interface LlmMcpTool {
   allowed_tools?: string[];
 }
 
-export type LlmTool = LlmFunctionTool | LlmServerTool | LlmMcpTool;
+/**
+ * Desktop / computer use. Anthropic is the primary provider (`computer_20250124`
+ * + optional `bash_20250124` + `text_editor_20250124` companions). Other
+ * providers drop silently unless their adapter declares support.
+ *
+ * Execution happens locally via a `ComputerExecutor` plugged into the
+ * agentic loop runner. The interface declares the tool surface; the sandbox
+ * is the executor's concern.
+ */
+export interface LlmComputerUseTool {
+  type: "computer_use";
+  display: { width: number; height: number; displayNumber?: number };
+  /** Which Anthropic sub-tools to enable. Defaults to all three. */
+  enabledTools?: ("computer" | "bash" | "text_editor")[];
+}
+
+export type LlmTool = LlmFunctionTool | LlmServerTool | LlmMcpTool | LlmComputerUseTool;
 
 export type LlmToolChoice =
   | "auto"
@@ -112,6 +142,12 @@ export interface LlmUsage {
 }
 
 export interface LlmToolCall {
+  /**
+   * Provider-assigned id used to correlate with the role:"tool" response message.
+   * Optional because not every adapter yet surfaces it (xAI wrapper, some Gemini
+   * responses). The agentic loop runner synthesizes `fc-${index}` when missing.
+   */
+  id?: string;
   name: string;
   args: unknown;
 }
@@ -144,6 +180,18 @@ export interface LlmCapabilities {
   promptCacheKey: boolean;
   /** Supports `previous_response_id` for stored-conversation continuation. */
   previousResponseId: boolean;
+  /**
+   * Round-trips role:"tool" messages for local function-tool execution.
+   * True for all Chat-Completions-family adapters. The agentic loop runner
+   * relies on this to iterate chat → execute → re-chat.
+   */
+  functionToolLoop: boolean;
+  /**
+   * Desktop/computer-use tool type (`computer_use` in LlmTool). When false,
+   * adapters drop the tool with a warn and the loop runner surfaces a
+   * capability error if the caller insisted.
+   */
+  computerUse: boolean;
   /** Soft guardrail for callers. */
   maxContextTokens: number;
 }

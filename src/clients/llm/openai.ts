@@ -36,6 +36,8 @@ const CAPABILITIES: LlmCapabilities = {
   batch: true,
   promptCacheKey: false,
   previousResponseId: false,
+  functionToolLoop: true,
+  computerUse: false,
   maxContextTokens: 128000,
 };
 

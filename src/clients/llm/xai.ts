@@ -46,6 +46,8 @@ export const XAI_CAPABILITIES: LlmCapabilities = {
   batch: true,
   promptCacheKey: true,
   previousResponseId: true,
+  functionToolLoop: true,
+  computerUse: false,
   maxContextTokens: 2_000_000,
 };
 

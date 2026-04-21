@@ -272,6 +272,8 @@ describe("gemini adapter", () => {
       batch: false,
       promptCacheKey: false,
       previousResponseId: false,
+      functionToolLoop: true,
+      computerUse: false,
       maxContextTokens: 2_000_000,
     });
   });
