@@ -311,19 +311,24 @@ describe("anthropic adapter — chat()", () => {
     expect(tools[0]?.name).toBe("web_search");
   });
 
-  it("8. capabilities declare batch=false and previousResponseId=false", () => {
+  it("8. capabilities declare batch=true (inline-batch path) and previousResponseId=false", () => {
     const p = makeProvider();
     expect(p.name).toBe("anthropic");
     expect(p.capabilities.structuredOutput).toBe(true);
     expect(p.capabilities.mcp).toBe(true);
     expect(p.capabilities.serverSideTools).toEqual(["web_search"]);
-    expect(p.capabilities.batch).toBe(false);
+    expect(p.capabilities.batch).toBe(true);
     expect(p.capabilities.promptCacheKey).toBe(true);
     expect(p.capabilities.previousResponseId).toBe(false);
     expect(p.capabilities.maxContextTokens).toBe(200_000);
-    // Batch optional methods absent (so hasBatch() returns false cleanly).
+    // File-based batch path NOT exposed — inline-only adapter.
     expect(p.filesUpload).toBeUndefined();
     expect(p.batchCreate).toBeUndefined();
+    // Inline path exposed.
+    expect(typeof p.batchCreateInline).toBe("function");
+    expect(typeof p.batchGet).toBe("function");
+    expect(typeof p.batchResults).toBe("function");
+    expect(typeof p.buildBatchLine).toBe("function");
   });
 
   it("9. parallelToolCalls=false → disable_parallel_tool_use=true", () => {
@@ -468,6 +473,225 @@ describe("anthropic adapter — chat()", () => {
     const mcp = req.mcp_servers as Array<Record<string, unknown>>;
     expect(mcp).toHaveLength(1);
     expect(mcp[0]?.["name"]).toBe("brainctl");
+  });
+
+  it("17. batchCreateInline: sends {requests: [{custom_id, params}]} to /v1/messages/batches", async () => {
+    let batchCreateBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post("https://api.anthropic.com/v1/messages/batches", async ({ request }) => {
+        batchCreateBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          id: "msgbatch_abc",
+          type: "message_batch",
+          processing_status: "in_progress",
+          created_at: "2026-04-20T12:00:00Z",
+          ended_at: null,
+          expires_at: "2026-04-21T12:00:00Z",
+          archived_at: null,
+          cancel_initiated_at: null,
+          results_url: null,
+          request_counts: { processing: 2, succeeded: 0, errored: 0, canceled: 0, expired: 0 },
+        });
+      }),
+    );
+
+    const p = makeProvider();
+    if (typeof p.batchCreateInline !== "function") throw new Error("no batchCreateInline");
+
+    const handle = await p.batchCreateInline({
+      requests: [
+        {
+          custom_id: "consolidator:dream_cycle",
+          body: {
+            model: "claude-sonnet-4-5-20250514",
+            max_tokens: 1024,
+            messages: [{ role: "user", content: "dream" }],
+          },
+        },
+        {
+          custom_id: "consolidator:gaps_scan",
+          body: {
+            model: "claude-sonnet-4-5-20250514",
+            max_tokens: 1024,
+            messages: [{ role: "user", content: "gaps" }],
+          },
+        },
+      ],
+    });
+
+    expect(handle.id).toBe("msgbatch_abc");
+    expect(handle.status).toBe("in_progress");
+    expect(handle.request_counts).toEqual({ total: 2, completed: 0, failed: 0 });
+    expect(handle.created_at).toBeGreaterThan(0);
+    expect(handle.completed_at).toBeUndefined();
+
+    const body = batchCreateBody as unknown as Record<string, unknown>;
+    const requests = body["requests"] as Array<{
+      custom_id: string;
+      params: Record<string, unknown>;
+    }>;
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.custom_id).toBe("consolidator:dream_cycle");
+    expect(requests[0]?.params?.["model"]).toBe("claude-sonnet-4-5-20250514");
+    expect(requests[0]?.params?.["messages"]).toEqual([{ role: "user", content: "dream" }]);
+    expect(requests[1]?.custom_id).toBe("consolidator:gaps_scan");
+  });
+
+  it("18. batchGet: maps processing_status in_progress→in_progress, canceling→cancelling, ended→completed", async () => {
+    let next: "in_progress" | "canceling" | "ended" = "in_progress";
+    server.use(
+      http.get("https://api.anthropic.com/v1/messages/batches/:id", () => {
+        return HttpResponse.json({
+          id: "msgbatch_xyz",
+          type: "message_batch",
+          processing_status: next,
+          created_at: "2026-04-20T12:00:00Z",
+          ended_at: next === "ended" ? "2026-04-20T12:30:00Z" : null,
+          expires_at: "2026-04-21T12:00:00Z",
+          archived_at: null,
+          cancel_initiated_at: next === "canceling" ? "2026-04-20T12:15:00Z" : null,
+          results_url:
+            next === "ended"
+              ? "https://api.anthropic.com/v1/messages/batches/msgbatch_xyz/results"
+              : null,
+          request_counts:
+            next === "ended"
+              ? { processing: 0, succeeded: 3, errored: 1, canceled: 0, expired: 1 }
+              : { processing: 5, succeeded: 0, errored: 0, canceled: 0, expired: 0 },
+        });
+      }),
+    );
+
+    const p = makeProvider();
+    if (typeof p.batchGet !== "function") throw new Error("no batchGet");
+
+    next = "in_progress";
+    const h1 = await p.batchGet("msgbatch_xyz");
+    expect(h1.status).toBe("in_progress");
+    expect(h1.completed_at).toBeUndefined();
+
+    next = "canceling";
+    const h2 = await p.batchGet("msgbatch_xyz");
+    expect(h2.status).toBe("cancelling");
+
+    next = "ended";
+    const h3 = await p.batchGet("msgbatch_xyz");
+    expect(h3.status).toBe("completed");
+    expect(h3.completed_at).toBeGreaterThan(0);
+    expect(h3.request_counts).toEqual({ total: 5, completed: 3, failed: 2 });
+  });
+
+  it("19. batchResults: succeeded→response.body, errored/canceled/expired→error", async () => {
+    const jsonl = [
+      JSON.stringify({
+        custom_id: "consolidator:dream_cycle",
+        result: {
+          type: "succeeded",
+          message: {
+            id: "msg_1",
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: "dream output" }],
+          },
+        },
+      }),
+      JSON.stringify({
+        custom_id: "consolidator:gaps_scan",
+        result: {
+          type: "errored",
+          error: { type: "overloaded_error", message: "server overloaded" },
+        },
+      }),
+      JSON.stringify({
+        custom_id: "consolidator:retirement_analysis",
+        result: { type: "expired" },
+      }),
+      JSON.stringify({
+        custom_id: "consolidator:reflexion_write",
+        result: { type: "canceled" },
+      }),
+    ].join("\n");
+
+    server.use(
+      http.get("https://api.anthropic.com/v1/messages/batches/:id", ({ params }) => {
+        return HttpResponse.json({
+          id: String(params["id"]),
+          type: "message_batch",
+          processing_status: "ended",
+          created_at: "2026-04-20T12:00:00Z",
+          ended_at: "2026-04-20T12:30:00Z",
+          expires_at: "2026-04-21T12:00:00Z",
+          archived_at: null,
+          cancel_initiated_at: null,
+          results_url: `https://api.anthropic.com/v1/messages/batches/${params["id"]}/results`,
+          request_counts: { processing: 0, succeeded: 1, errored: 1, canceled: 1, expired: 1 },
+        });
+      }),
+      http.get("https://api.anthropic.com/v1/messages/batches/:id/results", () => {
+        return new HttpResponse(`${jsonl}\n`, {
+          status: 200,
+          headers: { "content-type": "application/x-jsonl" },
+        });
+      }),
+    );
+
+    const p = makeProvider();
+    if (typeof p.batchResults !== "function") throw new Error("no batchResults");
+
+    const iter = await p.batchResults("msgbatch_results");
+    const lines: Array<{
+      id: string;
+      custom_id: string;
+      response?: { status_code: number; body: Record<string, unknown> };
+      error?: { code: string; message: string };
+    }> = [];
+    for await (const line of iter) {
+      lines.push(line);
+    }
+    expect(lines).toHaveLength(4);
+
+    const ok = lines.find((l) => l.custom_id === "consolidator:dream_cycle");
+    expect(ok?.response?.status_code).toBe(200);
+    const okBody = ok?.response?.body as Record<string, unknown>;
+    expect(okBody?.["id"]).toBe("msg_1");
+    const content = okBody?.["content"] as Array<{ type: string; text: string }>;
+    expect(content?.[0]?.text).toBe("dream output");
+
+    const errored = lines.find((l) => l.custom_id === "consolidator:gaps_scan");
+    expect(errored?.response).toBeUndefined();
+    expect(errored?.error?.code).toBe("overloaded_error");
+    expect(errored?.error?.message).toBe("server overloaded");
+
+    const expired = lines.find((l) => l.custom_id === "consolidator:retirement_analysis");
+    expect(expired?.error?.code).toBe("expired");
+
+    const canceled = lines.find((l) => l.custom_id === "consolidator:reflexion_write");
+    expect(canceled?.error?.code).toBe("canceled");
+  });
+
+  it("20. buildBatchLine: returns Anthropic-shaped body with method/url envelope", () => {
+    const p = makeProvider();
+    if (typeof p.buildBatchLine !== "function") throw new Error("no buildBatchLine");
+
+    const line = p.buildBatchLine(
+      {
+        model: "claude-sonnet-4-5-20250514",
+        messages: [
+          { role: "system", content: "persona" },
+          { role: "user", content: "hi" },
+        ],
+        maxOutputTokens: 2048,
+      },
+      "consolidator:dream_cycle",
+    );
+
+    expect(line.custom_id).toBe("consolidator:dream_cycle");
+    expect(line.method).toBe("POST");
+    expect(line.url).toBe("/v1/messages");
+    expect(line.body["model"]).toBe("claude-sonnet-4-5-20250514");
+    expect(line.body["max_tokens"]).toBe(2048);
+    expect(line.body["system"]).toEqual([{ type: "text", text: "persona" }]);
+    expect(line.body["messages"]).toEqual([{ role: "user", content: "hi" }]);
   });
 
   it("16. anthropic-beta: computer-use-2025-01-24 header set when computer_use requested; absent otherwise", async () => {

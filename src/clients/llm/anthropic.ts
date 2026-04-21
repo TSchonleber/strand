@@ -1,7 +1,12 @@
 import { log } from "@/util/log";
 import Anthropic from "@anthropic-ai/sdk";
-import { LlmCapabilityError, type LlmProvider } from "./provider";
+import type { LlmProvider } from "./provider";
 import type {
+  LlmBatchCreateInlineArgs,
+  LlmBatchHandle,
+  LlmBatchRequestLine,
+  LlmBatchResultLine,
+  LlmBatchStatus,
   LlmCall,
   LlmCapabilities,
   LlmComputerUseTool,
@@ -41,12 +46,12 @@ import type {
  *  - `include`, `previousResponseId`, `store` → silently dropped (unsupported)
  *  - `providerOptions` merged last so callers can override any field
  *
- * Batch: not implemented in v1. Anthropic's Message Batches endpoint accepts
- * requests inline (no separate file upload), so it doesn't fit the current
- * `filesUpload + batchCreate(input_file_id)` interface without interface
- * changes. See Phase 1.5+ inline-batch path.
- * TODO(phase-1.5-inline-batch): add inline-batch support via a
- * provider-inline request shape once the LlmProvider interface gains it.
+ * Batch: implemented via the inline-batch path. Anthropic's Message Batches
+ * endpoint accepts requests inline (no separate file upload) as
+ * `{requests: [{custom_id, params}]}`. We expose `batchCreateInline`,
+ * `batchGet`, and `batchResults`, plus `buildBatchLine` for callers that want
+ * a uniform JSONL-style representation (the method/url envelope is discarded
+ * by `batchCreateInline` since Anthropic inline batches don't use one).
  */
 
 const DEFAULT_MAX_TOKENS = 4096;
@@ -56,7 +61,7 @@ const CAPABILITIES: LlmCapabilities = {
   structuredOutput: true,
   mcp: true,
   serverSideTools: ["web_search"],
-  batch: false,
+  batch: true,
   promptCacheKey: true,
   previousResponseId: false,
   functionToolLoop: true,
@@ -469,23 +474,176 @@ export function makeAnthropicProvider(opts: AnthropicProviderOptions): LlmProvid
     };
   }
 
-  // Batch unsupported in v1. We deliberately do NOT attach filesUpload /
-  // batchCreate / batchGet / batchResults so `hasBatch()` short-circuits
-  // cleanly on capabilities.batch === false. If a caller still calls one of
-  // them via the optional method shape, throw an explicit capability error.
-  function batchUnsupported(): never {
-    throw new LlmCapabilityError("batch");
+  async function batchCreateInline(args: LlmBatchCreateInlineArgs): Promise<LlmBatchHandle> {
+    // Anthropic's SDK expects `{requests: [{custom_id, params}]}`. Our
+    // cross-provider shape is `{custom_id, body}` — rename `body` to `params`
+    // and hand off. Completion window / metadata are not honored by the inline
+    // endpoint today; we log them at debug if set so callers aren't silently
+    // surprised.
+    if (args.completionWindow !== undefined || args.metadata !== undefined) {
+      log.debug(
+        {
+          svc: "anthropic",
+          has_completion_window: args.completionWindow !== undefined,
+          has_metadata: args.metadata !== undefined,
+        },
+        "anthropic.batch.create_inline.unsupported_opts_dropped",
+      );
+    }
+
+    const requests = args.requests.map((r) => ({ custom_id: r.custom_id, params: r.body }));
+    const t0 = Date.now();
+    const resp = (await (client.messages.batches.create as (b: unknown) => Promise<unknown>)({
+      requests,
+    })) as AnthropicMessageBatch;
+
+    log.info(
+      {
+        svc: "anthropic",
+        batch_id: resp.id,
+        request_count: args.requests.length,
+        processing_status: resp.processing_status,
+        durationMs: Date.now() - t0,
+      },
+      "anthropic.batch.create_inline",
+    );
+    return translateBatch(resp);
+  }
+
+  async function batchGet(id: string): Promise<LlmBatchHandle> {
+    const resp = (await (client.messages.batches.retrieve as (id: string) => Promise<unknown>)(
+      id,
+    )) as AnthropicMessageBatch;
+    return translateBatch(resp);
+  }
+
+  async function batchResults(id: string): Promise<AsyncIterable<LlmBatchResultLine>> {
+    const iter = (await (client.messages.batches.results as (id: string) => Promise<unknown>)(
+      id,
+    )) as AsyncIterable<AnthropicMessageBatchIndividualResponse>;
+    return mapInlineResults(iter);
+  }
+
+  function buildBatchLineImpl(call: LlmCall, customId: string): LlmBatchRequestLine {
+    // Keep the interface uniform: return a method/url-wrapped line so file-
+    // based callers can JSONL.stringify it. batchCreateInline strips the
+    // envelope when it posts — the url is advisory for Anthropic.
+    return {
+      custom_id: customId,
+      method: "POST",
+      url: "/v1/messages",
+      body: buildAnthropicRequest(call) as unknown as Record<string, unknown>,
+    };
   }
 
   return {
     name: "anthropic",
     capabilities: CAPABILITIES,
     chat,
-    // Explicit shims so tooling that inspects `typeof p.filesUpload` sees
-    // `undefined`, matching the contract. (Left commented so hasBatch()'s
-    // typeof checks return false.)
-    // Don't attach batch* methods — see `hasBatch` type guard in provider.ts.
-  } satisfies LlmProvider & { _batchUnsupported?: typeof batchUnsupported };
+    batchCreateInline,
+    batchGet,
+    batchResults,
+    buildBatchLine: buildBatchLineImpl,
+  } satisfies LlmProvider;
 }
 
 export const _capabilities: LlmCapabilities = CAPABILITIES;
+
+// ─── Batch: inline path ─────────────────────────────────────────────────────
+
+interface AnthropicMessageBatchRequestCounts {
+  processing: number;
+  succeeded: number;
+  errored: number;
+  canceled: number;
+  expired: number;
+}
+
+interface AnthropicMessageBatch {
+  id: string;
+  type?: "message_batch";
+  processing_status: "in_progress" | "canceling" | "ended";
+  created_at: string;
+  ended_at: string | null;
+  expires_at: string;
+  archived_at: string | null;
+  cancel_initiated_at: string | null;
+  request_counts: AnthropicMessageBatchRequestCounts;
+  results_url: string | null;
+}
+
+interface AnthropicMessageBatchIndividualResponse {
+  custom_id: string;
+  result:
+    | { type: "succeeded"; message: Record<string, unknown> }
+    | { type: "errored"; error: { type?: string; message?: string; [k: string]: unknown } }
+    | { type: "canceled" }
+    | { type: "expired" };
+}
+
+function mapBatchStatus(s: AnthropicMessageBatch["processing_status"]): LlmBatchStatus {
+  switch (s) {
+    case "in_progress":
+      return "in_progress";
+    case "canceling":
+      return "cancelling";
+    case "ended":
+      // Anthropic's `ended` means "processing stopped" regardless of per-request
+      // outcome — succeeded, errored, expired, canceled all roll up into it.
+      // Per-request failures surface through the results stream, not here.
+      return "completed";
+  }
+}
+
+function rfc3339ToUnixSeconds(s: string | null): number {
+  if (!s) return 0;
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? Math.floor(t / 1000) : 0;
+}
+
+function translateBatch(b: AnthropicMessageBatch): LlmBatchHandle {
+  const counts = b.request_counts;
+  const total =
+    counts.processing + counts.succeeded + counts.errored + counts.canceled + counts.expired;
+  const handle: LlmBatchHandle = {
+    id: b.id,
+    status: mapBatchStatus(b.processing_status),
+    created_at: rfc3339ToUnixSeconds(b.created_at),
+    request_counts: {
+      total,
+      completed: counts.succeeded,
+      failed: counts.errored + counts.expired + counts.canceled,
+    },
+  };
+  if (b.ended_at) handle.completed_at = rfc3339ToUnixSeconds(b.ended_at);
+  return handle;
+}
+
+async function* mapInlineResults(
+  iter: AsyncIterable<AnthropicMessageBatchIndividualResponse>,
+): AsyncIterable<LlmBatchResultLine> {
+  for await (const line of iter) {
+    const out: LlmBatchResultLine = {
+      id: line.custom_id,
+      custom_id: line.custom_id,
+    };
+    const r = line.result;
+    if (r.type === "succeeded") {
+      out.response = {
+        status_code: 200,
+        body: r.message,
+      };
+    } else if (r.type === "errored") {
+      const err = r.error ?? {};
+      out.error = {
+        code: String(err["type"] ?? "errored"),
+        message: String(err["message"] ?? "request errored"),
+      };
+    } else if (r.type === "canceled") {
+      out.error = { code: "canceled", message: "request canceled" };
+    } else if (r.type === "expired") {
+      out.error = { code: "expired", message: "request expired" };
+    }
+    yield out;
+  }
+}

@@ -1,5 +1,6 @@
 import type {
   LlmBatchCreateArgs,
+  LlmBatchCreateInlineArgs,
   LlmBatchHandle,
   LlmBatchRequestLine,
   LlmBatchResultLine,
@@ -13,7 +14,15 @@ import type {
  *
  * Adapters MUST implement `chat` + declare `capabilities`.
  * Batch methods are optional — only present on providers where
- * `capabilities.batch === true`. Call `hasBatch(provider)` before using them.
+ * `capabilities.batch === true`. Two transport shapes are supported:
+ *
+ *  - file-based (xAI, OpenAI): `filesUpload` + `batchCreate({inputFileId})`
+ *    + `batchGet` + `batchResults`. Use `hasBatch(provider)` to narrow.
+ *  - inline (Anthropic): `batchCreateInline({requests})` + `batchGet` +
+ *    `batchResults`. Use `hasInlineBatch(provider)` to narrow.
+ *
+ * A provider may support exactly one shape. Callers should try `hasInlineBatch`
+ * first (no file-upload round-trip) and fall back to `hasBatch`.
  */
 export interface LlmProvider {
   readonly name: "openai" | "anthropic" | "xai" | "gemini" | string;
@@ -26,24 +35,32 @@ export interface LlmProvider {
    */
   chat<T = unknown>(input: LlmCall): Promise<LlmResult<T>>;
 
-  /** Optional capability group — all present or all absent. */
+  // File-based batch (xAI, OpenAI). Present together or not at all.
   filesUpload?(jsonl: string, purpose?: string): Promise<{ id: string }>;
   batchCreate?(args: LlmBatchCreateArgs): Promise<LlmBatchHandle>;
+
+  // Inline batch (Anthropic). Present instead of `batchCreate` + `filesUpload`.
+  batchCreateInline?(args: LlmBatchCreateInlineArgs): Promise<LlmBatchHandle>;
+
+  // Shared polling + results. Required whenever EITHER batch path is present.
   batchGet?(id: string): Promise<LlmBatchHandle>;
   batchResults?(id: string): Promise<AsyncIterable<LlmBatchResultLine>>;
 
   /**
-   * Build a single JSONL line for this provider's Batch API from an LlmCall.
-   * Required when `capabilities.batch === true`. Non-batch providers throw
-   * `LlmCapabilityError("batch")`.
-   *
-   * Consolidator uses this to generalize: `provider.buildBatchLine(call, id)`
-   * gives a provider-native request body without leaking xAI specifics.
+   * Build a single JSONL-style request line from an LlmCall. Required when
+   * `capabilities.batch === true`. For file-based providers this is the line
+   * that's concatenated into the uploaded JSONL; for inline providers it's
+   * used to derive `{custom_id, body}` pairs (the method/url envelope is
+   * discarded — inline providers don't need it).
    */
   buildBatchLine?(call: LlmCall, customId: string): LlmBatchRequestLine;
 }
 
-/** Type guard — narrows provider so batch* methods are callable without `!`. */
+/**
+ * Type guard — narrows provider so the file-based batch methods are callable
+ * without `!`. True only when the provider exposes the full file-upload
+ * pipeline (xAI, OpenAI).
+ */
 export function hasBatch(
   p: LlmProvider,
 ): p is LlmProvider &
@@ -54,6 +71,36 @@ export function hasBatch(
     typeof p.batchCreate === "function" &&
     typeof p.batchGet === "function" &&
     typeof p.batchResults === "function"
+  );
+}
+
+/**
+ * Type guard — narrows provider so the inline batch methods are callable
+ * without `!`. True only when the provider exposes the inline-create pipeline
+ * (Anthropic).
+ */
+export function hasInlineBatch(
+  p: LlmProvider,
+): p is LlmProvider &
+  Required<Pick<LlmProvider, "batchCreateInline" | "batchGet" | "batchResults">> {
+  return (
+    p.capabilities.batch &&
+    typeof p.batchCreateInline === "function" &&
+    typeof p.batchGet === "function" &&
+    typeof p.batchResults === "function"
+  );
+}
+
+/**
+ * True when the provider can be polled for batch status + results regardless
+ * of which submission shape it supports. Used by pollers that don't care how
+ * the batch was submitted — they just read state.
+ */
+export function hasBatchPoll(
+  p: LlmProvider,
+): p is LlmProvider & Required<Pick<LlmProvider, "batchGet" | "batchResults">> {
+  return (
+    p.capabilities.batch && typeof p.batchGet === "function" && typeof p.batchResults === "function"
   );
 }
 
