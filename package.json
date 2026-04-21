@@ -20,6 +20,7 @@
     "oauth:setup": "tsx scripts/oauth-setup.ts",
     "memory:bootstrap": "tsx scripts/bootstrap-memory.ts",
     "shadow:replay": "tsx scripts/replay-shadow.ts",
+    "smoke:shadow": "tsx scripts/smoke-shadow.ts",
     "status": "tsx src/cli/status.ts",
     "review": "tsx src/cli/review.ts"
   },
