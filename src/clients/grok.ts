@@ -1,6 +1,6 @@
 import { env } from "@/config";
 import { log } from "@/util/log";
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 import { z } from "zod";
 
 /**
@@ -299,9 +299,46 @@ export const CONSOLIDATOR_MCP_ALLOWLIST = [
 // not usable for Responses API, so we don't implement it.
 //
 // Flow: upload JSONL to /v1/files → POST /v1/batches with input_file_id →
-// poll GET /v1/batches/:id → fetch results at /v1/batches/:id/results.
-// 50% off all token classes. Up to 50k requests/file, 200MB/file, ~24h SLA.
+// poll GET /v1/batches/:id → fetch results (either via output_file_id +
+// files.content, or a direct result_url the server hands back). 50% off all
+// token classes. Up to 50k requests/file, 200MB/file, ~24h SLA.
 
+export interface GrokBatch {
+  id: string;
+  status:
+    | "validating"
+    | "in_progress"
+    | "completed"
+    | "failed"
+    | "expired"
+    | "cancelling"
+    | "cancelled"
+    | "finalizing";
+  input_file_id: string;
+  output_file_id?: string;
+  error_file_id?: string;
+  created_at: number;
+  completed_at?: number;
+  request_counts?: { total: number; completed: number; failed: number };
+  endpoint?: string;
+  completion_window?: string;
+  /** Some providers (xAI seen in the wild) return a direct URL for results. */
+  output_file_url?: string;
+  result_url?: string;
+  results_url?: string;
+}
+
+export interface GrokBatchLine {
+  id: string;
+  custom_id: string;
+  response?: { status_code: number; body: Record<string, unknown> };
+  error?: { code: string; message: string };
+}
+
+/**
+ * Build a single JSONL line for the Batch API. The `body` must already be a
+ * snake_case, model-class-clean /v1/responses request (see buildResponsesBody).
+ */
 export function buildBatchRequestLine(args: {
   customId: string;
   url: "/v1/responses" | "/v1/chat/completions";
@@ -315,12 +352,187 @@ export function buildBatchRequestLine(args: {
   });
 }
 
-export async function grokBatchCreate(_inputFileId: string): Promise<{ id: string }> {
-  throw new Error("grokBatchCreate: implement when Consolidator lands");
+/**
+ * Build a /v1/responses request body suitable for batching. Mirrors the
+ * reasoning-model param hygiene enforced by buildRequest() above — kept as a
+ * sibling helper so the sync path (grokCall) stays untouched this pass.
+ *
+ * If the two drift, reconcile by having buildRequest() delegate to this.
+ */
+export function buildResponsesBody(input: GrokCallInput): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model: input.model,
+    input: [
+      ...input.systemPrompts.map((content) => ({ role: "system", content })),
+      { role: "user", content: input.userInput },
+    ],
+  };
+
+  if (input.tools && input.tools.length > 0) body["tools"] = input.tools;
+  if (input.toolChoice !== undefined) body["tool_choice"] = input.toolChoice;
+  if (input.parallelToolCalls !== undefined) body["parallel_tool_calls"] = input.parallelToolCalls;
+  if (input.maxTurns !== undefined) body["max_turns"] = input.maxTurns;
+  if (input.maxOutputTokens) body["max_output_tokens"] = input.maxOutputTokens;
+  if (input.promptCacheKey) body["prompt_cache_key"] = input.promptCacheKey;
+  if (input.include && input.include.length > 0) body["include"] = input.include;
+  if (input.previousResponseId) body["previous_response_id"] = input.previousResponseId;
+  if (input.store !== undefined) body["store"] = input.store;
+
+  if (input.responseSchema) {
+    body["response_format"] = {
+      type: "json_schema",
+      json_schema: {
+        name: input.responseSchema.name,
+        schema: input.responseSchema.schema,
+        strict: input.responseSchema.strict ?? true,
+      },
+    };
+  }
+
+  if (!isReasoningModel(input.model) && input.temperature !== undefined) {
+    body["temperature"] = input.temperature;
+  }
+  // Reasoning models reject presence_penalty / frequency_penalty / stop /
+  // reasoning_effort; logprobs is silently ignored. We never send them.
+
+  return body;
 }
 
-export async function grokBatchGet(_id: string): Promise<unknown> {
-  throw new Error("grokBatchGet: implement when Consolidator lands");
+/**
+ * Upload a JSONL blob to xAI's /v1/files as a batch input. Returns { id }.
+ * The SDK routes to `baseURL`, so this hits api.x.ai/v1/files.
+ */
+export async function grokFilesUpload(
+  jsonl: string,
+  purpose: "batch" = "batch",
+): Promise<{ id: string }> {
+  const file = await toFile(Buffer.from(jsonl, "utf8"), "batch.jsonl", {
+    type: "application/jsonl",
+  });
+  // biome-ignore lint/suspicious/noExplicitAny: SDK boundary — xAI accepts "batch" purpose
+  const resp = await (client.files as any).create({ file, purpose });
+  const id = String((resp as { id?: string }).id ?? "");
+  log.info({ svc: "grok", file_id: id, purpose }, "grok.files.upload");
+  return { id };
+}
+
+/** Create a batch over an uploaded JSONL input file. */
+export async function grokBatchCreate(args: {
+  inputFileId: string;
+  endpoint?: "/v1/responses" | "/v1/chat/completions";
+  completionWindow?: "24h";
+  metadata?: Record<string, string>;
+}): Promise<GrokBatch> {
+  const body = {
+    input_file_id: args.inputFileId,
+    endpoint: args.endpoint ?? "/v1/responses",
+    completion_window: args.completionWindow ?? "24h",
+    ...(args.metadata ? { metadata: args.metadata } : {}),
+  };
+  // biome-ignore lint/suspicious/noExplicitAny: SDK boundary — xAI accepts /v1/responses endpoint
+  const resp = (await (client.batches as any).create(body)) as GrokBatch;
+  log.info(
+    {
+      svc: "grok",
+      batch_id: resp.id,
+      status: resp.status,
+      endpoint: resp.endpoint,
+      input_file_id: resp.input_file_id,
+    },
+    "grok.batch.create",
+  );
+  return resp;
+}
+
+/** Retrieve a batch by id. */
+export async function grokBatchGet(id: string): Promise<GrokBatch> {
+  // biome-ignore lint/suspicious/noExplicitAny: SDK boundary — typings lag xAI fields
+  const resp = (await (client.batches as any).retrieve(id)) as GrokBatch;
+  log.debug(
+    {
+      svc: "grok",
+      batch_id: resp.id,
+      status: resp.status,
+      request_counts: resp.request_counts,
+    },
+    "grok.batch.get",
+  );
+  return resp;
+}
+
+/**
+ * Fetch and parse batch results as an async iterable of JSONL lines.
+ *
+ * Two retrieval shapes, per xAI observed behavior:
+ *   - `output_file_id`: use SDK files.content() to download.
+ *   - `output_file_url` / `result_url` / `results_url`: GET the direct URL.
+ *
+ * Emits a warning if request_counts.failed > 0 (partial-completion case).
+ */
+export async function grokBatchResults(id: string): Promise<AsyncIterable<GrokBatchLine>> {
+  const batch = await grokBatchGet(id);
+
+  const failed = batch.request_counts?.failed ?? 0;
+  if (failed > 0) {
+    log.warn(
+      {
+        svc: "grok",
+        batch_id: id,
+        request_counts: batch.request_counts,
+      },
+      "grok.batch.partial_failures",
+    );
+  }
+
+  const directUrl = batch.output_file_url ?? batch.result_url ?? batch.results_url;
+  let text: string;
+  if (directUrl) {
+    const resp = await fetch(directUrl);
+    if (!resp.ok) {
+      throw new Error(`grokBatchResults: fetch ${directUrl} → ${resp.status}`);
+    }
+    text = await resp.text();
+  } else if (batch.output_file_id) {
+    // biome-ignore lint/suspicious/noExplicitAny: SDK boundary
+    const fileResp = await (client.files as any).content(batch.output_file_id);
+    // Node fetch Response, Web Response, or SDK-wrapped string — all expose text().
+    if (typeof fileResp === "string") {
+      text = fileResp;
+    } else if (
+      fileResp &&
+      typeof (fileResp as { text?: () => Promise<string> }).text === "function"
+    ) {
+      text = await (fileResp as { text: () => Promise<string> }).text();
+    } else {
+      text = String(fileResp);
+    }
+  } else {
+    throw new Error(
+      `grokBatchResults: batch ${id} has no output_file_id or result url (status=${batch.status})`,
+    );
+  }
+
+  return toAsyncIterable(parseJsonlLines(text));
+}
+
+function toAsyncIterable<T>(src: Iterable<T>): AsyncIterable<T> {
+  return {
+    [Symbol.asyncIterator]: async function* () {
+      for (const v of src) yield v;
+    },
+  };
+}
+
+function* parseJsonlLines(text: string): Iterable<GrokBatchLine> {
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    try {
+      yield JSON.parse(line) as GrokBatchLine;
+    } catch (err) {
+      log.warn({ svc: "grok", err, line: line.slice(0, 200) }, "grok.batch.parse_line_failed");
+    }
+  }
 }
 
 // ─── Response schema for CandidateEnvelope[] ─────────────────
