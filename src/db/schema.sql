@@ -107,3 +107,46 @@ CREATE TABLE IF NOT EXISTS reasoner_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_reasoner_runs_tick ON reasoner_runs(tick_at);
 CREATE INDEX IF NOT EXISTS idx_reasoner_runs_stuck ON reasoner_runs(stuck_mid_thought);
+
+CREATE TABLE IF NOT EXISTS agent_task_graphs (
+  id TEXT PRIMARY KEY,
+  root_goal TEXT NOT NULL,
+  status TEXT NOT NULL,        -- pending|running|completed|failed|skipped|abandoned
+  metadata_json TEXT,          -- JSON object
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_agent_task_graphs_status ON agent_task_graphs(status);
+
+CREATE TABLE IF NOT EXISTS agent_task_steps (
+  id TEXT PRIMARY KEY,
+  graph_id TEXT NOT NULL REFERENCES agent_task_graphs(id) ON DELETE CASCADE,
+  parent_id TEXT,
+  goal TEXT NOT NULL,
+  allowed_tools_json TEXT NOT NULL,     -- JSON array of tool names
+  max_iterations INTEGER,
+  budget_json TEXT,                      -- partial BudgetLimits
+  status TEXT NOT NULL,
+  result_json TEXT,                      -- JSON.stringify(result)
+  error TEXT,
+  reflection TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  started_at TEXT,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_task_steps_graph ON agent_task_steps(graph_id);
+CREATE INDEX IF NOT EXISTS idx_agent_task_steps_status ON agent_task_steps(status);
+
+CREATE TABLE IF NOT EXISTS agent_tool_invocations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  graph_id TEXT NOT NULL REFERENCES agent_task_graphs(id) ON DELETE CASCADE,
+  step_id TEXT NOT NULL REFERENCES agent_task_steps(id) ON DELETE CASCADE,
+  tool_name TEXT NOT NULL,
+  args_json TEXT NOT NULL,
+  result_json TEXT,
+  error TEXT,
+  duration_ms INTEGER,
+  at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_agent_tool_invocations_graph ON agent_tool_invocations(graph_id, step_id);
