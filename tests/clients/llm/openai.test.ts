@@ -424,6 +424,60 @@ describe("openai.batch — batchResults streams JSONL lines", () => {
   });
 });
 
+describe("openai.buildBatchLine", () => {
+  it("returns a /v1/chat/completions line with the same body as chat()", () => {
+    const p = makeProvider();
+    if (!p.buildBatchLine) throw new Error("openai provider missing buildBatchLine");
+
+    const line = p.buildBatchLine(
+      {
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: "be concise" },
+          { role: "user", content: "hi" },
+        ],
+        temperature: 0.3,
+        maxOutputTokens: 128,
+        structuredOutput: {
+          name: "out",
+          schema: { type: "object", properties: { ok: { type: "boolean" } } },
+          strict: true,
+        },
+      },
+      "c1",
+    );
+
+    expect(line.custom_id).toBe("c1");
+    expect(line.method).toBe("POST");
+    expect(line.url).toBe("/v1/chat/completions");
+    expect(line.body["model"]).toBe("gpt-4o-mini");
+    expect(line.body["temperature"]).toBe(0.3);
+    expect(line.body["max_tokens"]).toBe(128);
+    const rf = line.body["response_format"] as Record<string, unknown>;
+    expect(rf["type"]).toBe("json_schema");
+    const msgs = line.body["messages"] as Array<Record<string, unknown>>;
+    expect(msgs[0]?.["role"]).toBe("system");
+    expect(msgs[1]?.["role"]).toBe("user");
+  });
+
+  it("routes reasoning-model param hygiene into the batch body", () => {
+    const p = makeProvider();
+    if (!p.buildBatchLine) throw new Error("openai provider missing buildBatchLine");
+    const line = p.buildBatchLine(
+      {
+        model: "o1-preview",
+        messages: [{ role: "user", content: "reason" }],
+        temperature: 0.7,
+        maxOutputTokens: 2048,
+      },
+      "c2",
+    );
+    expect(line.body["temperature"]).toBeUndefined();
+    expect(line.body["max_tokens"]).toBeUndefined();
+    expect(line.body["max_completion_tokens"]).toBe(2048);
+  });
+});
+
 describe("openai provider — name + capabilities", () => {
   it("declares expected capabilities", () => {
     const p = makeProvider();

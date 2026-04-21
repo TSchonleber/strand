@@ -1,16 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { GROK_CONSOLIDATOR_TOOLS } from "@/clients/brain";
-import {
-  type GrokCallInput,
-  type GrokTool,
-  brainctlMcpTool,
-  buildBatchRequestLine,
-  buildResponsesBody,
-  grokBatchCreate,
-  grokBatchGet,
-  grokBatchResults,
-  grokFilesUpload,
-} from "@/clients/grok";
+import { brainctlMcpTool } from "@/clients/grok";
+import { hasBatch, llm } from "@/clients/llm";
+import type { LlmCall, LlmMcpTool, LlmTool } from "@/clients/llm/types";
 import { env } from "@/config";
 import { db } from "@/db";
 import { loadPrompt } from "@/prompts";
@@ -19,15 +11,17 @@ import { loopLog } from "@/util/log";
 const log = loopLog("consolidator");
 
 /**
- * Nightly consolidation via xAI Batch API (50% off all token classes).
+ * Nightly consolidation — provider-agnostic.
  *
- * `consolidatorRun` builds a ~5-line JSONL, uploads it, creates the batch, and
- * records a `consolidator_runs` row with status='queued'. Polling/result
- * aggregation is `consolidatorPoll` — orchestrator should wire it separately
- * (every ~30 min during the 24h SLA window).
+ * When the active provider supports Batch (xAI, OpenAI), we build a JSONL of
+ * per-task requests via `provider.buildBatchLine()`, upload + create a batch,
+ * and insert a `consolidator_runs` row at status=queued. `consolidatorPoll`
+ * drives it to completion.
  *
- * Deferred Completions is Chat-Completions-only and is NOT a valid fallback.
- * If the Batch API is down we halt; no synchronous /v1/responses fallback here.
+ * When the provider does NOT support Batch (Anthropic, Gemini as of v1), we
+ * fall back to running each task synchronously via `provider.chat()` and
+ * record the aggregated summary directly — status=completed, batch_id
+ * `local:<uuid>` so the poll path skips it.
  */
 
 type TaskId =
@@ -96,54 +90,49 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function buildTools(): GrokTool[] {
-  const tools: GrokTool[] = [];
+function buildTools(): LlmTool[] {
+  const tools: LlmTool[] = [];
   if (env.BRAINCTL_REMOTE_MCP_URL) {
+    // `brainctlMcpTool` returns a GrokTool with `type:"mcp"`; the shape is
+    // 1:1 with LlmMcpTool, so we widen the type here. Non-MCP providers drop
+    // it with a warn per their adapter's partitioning rules.
     tools.push(
       brainctlMcpTool({
         url: env.BRAINCTL_REMOTE_MCP_URL,
         ...(env.BRAINCTL_REMOTE_MCP_TOKEN ? { token: env.BRAINCTL_REMOTE_MCP_TOKEN } : {}),
         allowedTools: GROK_CONSOLIDATOR_TOOLS,
-      }),
+      }) as unknown as LlmMcpTool,
     );
   }
   return tools;
 }
 
-function buildJsonl(): string {
+function taskToLlmCall(task: ConsolidationTask): LlmCall {
   const prompt = loadPrompt("consolidator.system");
   const tools = buildTools();
 
-  const lines: string[] = [];
-  for (const task of TASKS) {
-    const callInput: GrokCallInput = {
-      model: env.LLM_MODEL_REASONER,
-      systemPrompts: [
-        `# consolidator\n${prompt.content}`,
-        `# prompt_versions: consolidator=${prompt.hash}`,
-      ],
-      userInput: `Task: ${task.id}\n\n${task.instruction}\n\nReturn ONLY the JSON summary.`,
-      maxOutputTokens: 2000,
-      maxTurns: 5,
-      promptCacheKey: PROMPT_CACHE_KEY,
-      include: ["mcp_call_output", "reasoning.encrypted_content"],
-      responseSchema: {
-        name: "consolidator_summary",
-        schema: SUMMARY_SCHEMA,
-        strict: true,
+  const call: LlmCall = {
+    model: env.LLM_MODEL_REASONER,
+    messages: [
+      { role: "system", content: `# consolidator\n${prompt.content}` },
+      { role: "system", content: `# prompt_versions: consolidator=${prompt.hash}` },
+      {
+        role: "user",
+        content: `Task: ${task.id}\n\n${task.instruction}\n\nReturn ONLY the JSON summary.`,
       },
-    };
-    if (tools.length > 0) callInput.tools = tools;
-    const body = buildResponsesBody(callInput);
-    lines.push(
-      buildBatchRequestLine({
-        customId: `consolidator:${task.id}`,
-        url: "/v1/responses",
-        body,
-      }),
-    );
-  }
-  return `${lines.join("\n")}\n`;
+    ],
+    maxOutputTokens: 2000,
+    maxTurns: 5,
+    promptCacheKey: PROMPT_CACHE_KEY,
+    include: ["mcp_call_output", "reasoning.encrypted_content"],
+    structuredOutput: {
+      name: "consolidator_summary",
+      schema: SUMMARY_SCHEMA,
+      strict: true,
+    },
+  };
+  if (tools.length > 0) call.tools = tools;
+  return call;
 }
 
 export interface ConsolidatorRunResult {
@@ -165,39 +154,122 @@ export async function consolidatorRun(): Promise<void> {
 export async function consolidatorRunWithResult(): Promise<ConsolidatorRunResult> {
   const t0 = Date.now();
   const runId = randomUUID();
+  const provider = llm();
 
-  const jsonl = buildJsonl();
-  const { id: fileId } = await grokFilesUpload(jsonl, "batch");
-  const batch = await grokBatchCreate({
-    inputFileId: fileId,
-    endpoint: "/v1/responses",
-    completionWindow: "24h",
-  });
+  if (hasBatch(provider) && typeof provider.buildBatchLine === "function") {
+    const buildLine = provider.buildBatchLine.bind(provider);
+    const lines: string[] = [];
+    for (const task of TASKS) {
+      const line = buildLine(taskToLlmCall(task), `consolidator:${task.id}`);
+      lines.push(JSON.stringify(line));
+    }
+    const jsonl = `${lines.join("\n")}\n`;
 
+    const { id: fileId } = await provider.filesUpload(jsonl, "batch");
+    const batch = await provider.batchCreate({
+      inputFileId: fileId,
+      endpoint: provider.name === "xai" ? "/v1/responses" : "/v1/chat/completions",
+      completionWindow: "24h",
+    });
+
+    db()
+      .prepare(
+        `INSERT INTO consolidator_runs (id, batch_id, status, created_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(runId, batch.id, "queued", nowIso());
+
+    log.info(
+      {
+        runId,
+        batchId: batch.id,
+        fileId,
+        provider: provider.name,
+        taskCount: TASKS.length,
+        durationMs: Date.now() - t0,
+      },
+      "consolidator.run.submitted",
+    );
+
+    return { runId, batchId: batch.id };
+  }
+
+  // Sync fallback — provider has no Batch API.
+  log.warn({ provider: provider.name }, "consolidator.batch_not_supported.sync_fallback");
+
+  const summary: AggregatedSummary = {
+    changed: [],
+    insights: [],
+    gaps: [],
+    retirements: [],
+    failed_tasks: [],
+  };
+
+  for (const task of TASKS) {
+    try {
+      const res = await provider.chat<Partial<AggregatedSummary>>(taskToLlmCall(task));
+      const parsed: Partial<AggregatedSummary> | null =
+        res.parsed ??
+        (res.outputText ? safeJsonParse<Partial<AggregatedSummary>>(res.outputText) : null);
+      if (!parsed) {
+        summary.failed_tasks.push(`consolidator:${task.id}: no parseable summary`);
+        continue;
+      }
+      if (Array.isArray(parsed.changed)) summary.changed.push(...parsed.changed);
+      if (Array.isArray(parsed.insights)) summary.insights.push(...parsed.insights);
+      if (Array.isArray(parsed.gaps)) summary.gaps.push(...parsed.gaps);
+      if (Array.isArray(parsed.retirements)) summary.retirements.push(...parsed.retirements);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      summary.failed_tasks.push(`consolidator:${task.id}: ${msg}`);
+      log.warn({ err, task: task.id }, "consolidator.sync.task_failed");
+    }
+  }
+
+  const localBatchId = `local:${randomUUID()}`;
   db()
     .prepare(
-      `INSERT INTO consolidator_runs (id, batch_id, status, created_at)
-       VALUES (?, ?, ?, ?)`,
+      `INSERT INTO consolidator_runs (id, batch_id, status, created_at, completed_at, summary_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run(runId, batch.id, "queued", nowIso());
+    .run(runId, localBatchId, "completed", nowIso(), nowIso(), JSON.stringify(summary));
 
   log.info(
     {
       runId,
-      batchId: batch.id,
-      fileId,
+      batchId: localBatchId,
+      provider: provider.name,
       taskCount: TASKS.length,
+      counts: {
+        changed: summary.changed.length,
+        insights: summary.insights.length,
+        gaps: summary.gaps.length,
+        retirements: summary.retirements.length,
+        failed: summary.failed_tasks.length,
+      },
       durationMs: Date.now() - t0,
     },
-    "consolidator.run.submitted",
+    "consolidator.run.sync_completed",
   );
 
-  return { runId, batchId: batch.id };
+  return { runId, batchId: localBatchId };
+}
+
+function safeJsonParse<T>(text: string): T | null {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Poll open batches, update rows in consolidator_runs, aggregate summaries on
  * completion. Safe to call repeatedly (idempotent per-row).
+ *
+ * Rows with `batch_id` starting with `local:` are never returned by the
+ * open-row query (they're inserted at status=completed). Still a no-op for
+ * the sync-fallback path.
  */
 export async function consolidatorPoll(): Promise<void> {
   const openRows = db()
@@ -212,9 +284,18 @@ export async function consolidatorPoll(): Promise<void> {
     return;
   }
 
+  const provider = llm();
+  if (!hasBatch(provider)) {
+    log.warn(
+      { provider: provider.name, openRows: openRows.length },
+      "consolidator.poll.provider_has_no_batch",
+    );
+    return;
+  }
+
   for (const row of openRows) {
     try {
-      const batch = await grokBatchGet(row.batch_id);
+      const batch = await provider.batchGet(row.batch_id);
 
       if (batch.status === "completed") {
         const summary = await aggregateResults(row.batch_id);
@@ -257,10 +338,11 @@ export async function consolidatorPoll(): Promise<void> {
           "consolidator.poll.failed",
         );
       } else {
-        // validating / in_progress / finalizing / cancelling — keep polling.
-        const next = batch.status === "finalizing" ? "finalizing" : batch.status;
-        if (next !== row.status) {
-          db().prepare("UPDATE consolidator_runs SET status = ? WHERE id = ?").run(next, row.id);
+        // validating / in_progress / cancelling — keep polling.
+        if (batch.status !== row.status) {
+          db()
+            .prepare("UPDATE consolidator_runs SET status = ? WHERE id = ?")
+            .run(batch.status, row.id);
         }
         log.debug(
           { runId: row.id, batchId: row.batch_id, status: batch.status },
@@ -286,7 +368,13 @@ async function aggregateResults(batchId: string): Promise<AggregatedSummary> {
     failed_tasks: [],
   };
 
-  const iter = await grokBatchResults(batchId);
+  const provider = llm();
+  if (!hasBatch(provider)) {
+    out.failed_tasks.push(`${batchId}: provider ${provider.name} has no batch results path`);
+    return out;
+  }
+
+  const iter = await provider.batchResults(batchId);
   for await (const line of iter) {
     if (line.error) {
       out.failed_tasks.push(`${line.custom_id}: ${line.error.code} ${line.error.message}`);
@@ -343,6 +431,19 @@ function extractOutputText(body: Record<string, unknown>): string | null {
       }
     }
     if (parts.length > 0) return parts.join("");
+  }
+
+  // Chat Completions (OpenAI-shaped): body.choices[0].message.content
+  const choices = body["choices"];
+  if (Array.isArray(choices) && choices.length > 0) {
+    const first = choices[0];
+    if (first && typeof first === "object") {
+      const msg = (first as Record<string, unknown>)["message"] as
+        | Record<string, unknown>
+        | undefined;
+      const content = msg?.["content"];
+      if (typeof content === "string" && content.length > 0) return content;
+    }
   }
   return null;
 }

@@ -4,6 +4,7 @@ import type { LlmProvider } from "./provider";
 import type {
   LlmBatchCreateArgs,
   LlmBatchHandle,
+  LlmBatchRequestLine,
   LlmBatchResultLine,
   LlmCall,
   LlmCapabilities,
@@ -323,6 +324,13 @@ export function makeOpenAiProvider(opts: {
     return toAsyncIterable(parseJsonlLines(text));
   };
 
+  const buildBatchLine = (call: LlmCall, customId: string): LlmBatchRequestLine => ({
+    custom_id: customId,
+    method: "POST",
+    url: "/v1/chat/completions",
+    body: buildRequest(call),
+  });
+
   return {
     name: "openai",
     capabilities: CAPABILITIES,
@@ -331,6 +339,7 @@ export function makeOpenAiProvider(opts: {
     batchCreate,
     batchGet,
     batchResults,
+    buildBatchLine,
   };
 }
 
