@@ -101,10 +101,13 @@ strand: strand process {
     `src/auth/`
 
     **CredentialStore** — pluggable resolver
-    EnvCredentialStore (default)
-    FileCredentialStore (~/.strand/creds.json, 0600)
-    ChainedCredentialStore (file+env)
-    OAuthCredentialStore (decorator)
+    • Env (default · process.env)
+    • File (~/.strand/creds.json, 0600, atomic)
+    • EncryptedFile (AES-256-GCM + scrypt KDF)
+    • Keychain (@napi-rs/keyring, OS-native)
+    • Chained (file+env / encrypted+env / kc+env)
+    • TenantScoped (STRAND_TENANT=acme)
+    • OAuthStore (decorator)
       · auto-refresh within 60 s window
       · atomic rotation via setMany()
       · per-provider concurrency lock
@@ -335,7 +338,9 @@ status: Phase status {
     • typestate gate · reasoner via runAgenticLoop
     • 4 adapters: openai-compat · anthropic · xai · gemini
     • `llm()` factory + capabilities-driven features
-    • **BYOK credential stores**: env · file · file+env
+    • **BYOK credential stores**: env · file · encrypted-file
+       (AES-256-GCM + scrypt) · keychain (@napi-rs/keyring) ·
+       chained · **tenant-scoped** (STRAND_TENANT)
     • **OAuthCredentialStore** decorator — atomic refresh
        + concurrency lock; X strategy preregistered
     • `pnpm keys` CLI (list/get/set/delete/refresh-oauth)

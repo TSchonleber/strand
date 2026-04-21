@@ -1,20 +1,23 @@
 import { log } from "@/util/log";
 import type { CredentialStore } from "./credentials";
 import { MissingCredentialError } from "./credentials";
+import { EncryptedFileCredentialStore } from "./encrypted-file-store";
 import { EnvCredentialStore } from "./env-store";
 import { FileCredentialStore } from "./file-store";
+import { KeychainCredentialStore } from "./keychain-store";
 import { OAuthCredentialStore } from "./oauth-store";
 import { makeXOAuthStrategy } from "./oauth-x";
+import { TenantScopedCredentialStore } from "./tenant-store";
 
 export { MissingCredentialError } from "./credentials";
 export type { CredentialStore } from "./credentials";
+export { EncryptedFileCredentialStore } from "./encrypted-file-store";
 export { EnvCredentialStore } from "./env-store";
 export { FileCredentialStore } from "./file-store";
-export {
-  OAuthCredentialStore,
-  type OAuthProviderStrategy,
-} from "./oauth-store";
+export { KeychainCredentialStore } from "./keychain-store";
+export { OAuthCredentialStore, type OAuthProviderStrategy } from "./oauth-store";
 export { makeXOAuthStrategy } from "./oauth-x";
+export { TenantScopedCredentialStore } from "./tenant-store";
 
 let _default: CredentialStore | null = null;
 
@@ -22,14 +25,18 @@ let _default: CredentialStore | null = null;
  * Build the default credential store stack.
  *
  * Selection via `STRAND_CREDENTIAL_STORE` env:
- *   unset / "env"   → EnvCredentialStore (reads `.env`; current behavior)
- *   "file"          → FileCredentialStore (~/.strand/credentials.json)
- *   "file+env"      → FileCredentialStore with Env fallback (file wins when set)
+ *   "env"             → EnvCredentialStore (default — reads `.env`)
+ *   "file"            → FileCredentialStore (~/.strand/credentials.json, 0600)
+ *   "file+env"        → FileCredentialStore w/ EnvCredentialStore fallback
+ *   "encrypted-file"  → EncryptedFileCredentialStore (AES-256-GCM + scrypt)
+ *                       requires STRAND_CREDENTIAL_PASSPHRASE
+ *   "keychain"        → KeychainCredentialStore (@napi-rs/keyring)
  *
- * Wrapped in an OAuthCredentialStore when any OAuth-backed provider is in
- * play (X: if X_CLIENT_ID + X_CLIENT_SECRET are resolvable). Strategies are
- * registered lazily — calling `credentials()` with `withOauth=true` returns
- * a store that refreshes on first access.
+ * Additional env: `STRAND_TENANT` wraps the store in a
+ * TenantScopedCredentialStore, namespacing every key with `tenant:<id>:`.
+ *
+ * Wrapped in an OAuthCredentialStore by default (X refresh strategy
+ * preregistered). Pass `{ withOauth: false }` to skip.
  */
 export function credentials(opts?: {
   withOauth?: boolean;
@@ -39,13 +46,36 @@ export function credentials(opts?: {
   if (_default) return _default;
 
   const mode = process.env["STRAND_CREDENTIAL_STORE"] ?? "env";
+  const tenantId = process.env["STRAND_TENANT"];
   let base: CredentialStore;
-  if (mode === "file") {
-    base = new FileCredentialStore();
-  } else if (mode === "file+env") {
-    base = new ChainedCredentialStore([new FileCredentialStore(), new EnvCredentialStore()]);
-  } else {
-    base = new EnvCredentialStore();
+  switch (mode) {
+    case "file":
+      base = new FileCredentialStore();
+      break;
+    case "file+env":
+      base = new ChainedCredentialStore([new FileCredentialStore(), new EnvCredentialStore()]);
+      break;
+    case "encrypted-file":
+      base = new EncryptedFileCredentialStore();
+      break;
+    case "encrypted-file+env":
+      base = new ChainedCredentialStore([
+        new EncryptedFileCredentialStore(),
+        new EnvCredentialStore(),
+      ]);
+      break;
+    case "keychain":
+      base = new KeychainCredentialStore();
+      break;
+    case "keychain+env":
+      base = new ChainedCredentialStore([new KeychainCredentialStore(), new EnvCredentialStore()]);
+      break;
+    default:
+      base = new EnvCredentialStore();
+  }
+
+  if (tenantId) {
+    base = new TenantScopedCredentialStore(base, tenantId);
   }
 
   if (opts?.withOauth !== false) {
@@ -56,7 +86,15 @@ export function credentials(opts?: {
     _default = base;
   }
 
-  log.info({ svc: "auth", store: _default.name, mode }, "auth.credentials.initialized");
+  log.info(
+    {
+      svc: "auth",
+      store: _default.name,
+      mode,
+      tenant: tenantId ?? null,
+    },
+    "auth.credentials.initialized",
+  );
   return _default;
 }
 

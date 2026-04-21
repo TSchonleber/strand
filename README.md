@@ -38,12 +38,20 @@ pnpm dev                      # boot orchestrator in shadow mode
 
 ### Bring-your-own-key (BYOK)
 
-Strand resolves every credential through `src/auth/` — a pluggable `CredentialStore`. Pick your backend:
+Strand resolves every credential through `src/auth/` — a pluggable `CredentialStore`. Pick your backend via `STRAND_CREDENTIAL_STORE`:
 
 - **`env`** (default) — process env, matches historical behavior
-- **`file`** — `~/.strand/credentials.json`, 0600 perms, atomic writes
-- **`file+env`** — file overrides env (useful for local overrides without touching `.env`)
+- **`file`** — `~/.strand/credentials.json`, 0600 perms, atomic rename
+- **`file+env`** — file wins on read; env is fallback
+- **`encrypted-file`** — AES-256-GCM + scrypt KDF at rest. Requires `STRAND_CREDENTIAL_PASSPHRASE`. Zero new deps (Node's built-in `crypto`).
+- **`encrypted-file+env`** — encrypted file wins; env is fallback
+- **`keychain`** — OS-native (macOS Keychain / Linux Secret Service / Windows Credential Manager) via `@napi-rs/keyring` (optional dep — install with `pnpm add @napi-rs/keyring`)
+- **`keychain+env`** — keychain wins; env is fallback
 - **OAuth decorator** — wraps any base store, transparently refreshes provider tokens on access. X OAuth 2.0 PKCE is preregistered; `store.get("X_USER_ACCESS_TOKEN")` auto-refreshes within 60 s of expiry with atomic rotation of access + refresh + expiry.
+
+#### Multi-tenant (`STRAND_TENANT`)
+
+Set `STRAND_TENANT=acme` to namespace every credential key as `tenant:acme:<KEY>`. Different Strand processes (or requests, via `TenantScopedCredentialStore(base, tenantId)` directly) can share the same backing store without seeing each other's keys.
 
 ```bash
 pnpm keys list                              # what's in the store
