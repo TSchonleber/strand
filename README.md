@@ -55,6 +55,62 @@ Start in `shadow` until 100 candidates reviewed and ≥80% agree with your manua
 - **SQLite** for action log, idempotency, rate counters
 - In-process intervals in dev; scheduler TBD when prod needs it
 
+## Computer-use sandbox (DockerExecutor)
+
+Strand's agentic loop can route provider-native `computer`, `bash_20250124`, and `text_editor_20250124` tool calls to a `ComputerExecutor`. The default is `NoopExecutor` (logs intent, does nothing). For real side effects, use `DockerExecutor`, which drives a containerized Xvfb + fluxbox desktop via `xdotool` and `scrot`.
+
+### Build the sandbox image
+
+```bash
+docker build -t strand-sandbox:latest src/agent/docker-image
+```
+
+The image includes Xvfb, fluxbox, x11vnc (port 5900, no auth — isolate the container), xdotool, scrot, ffmpeg, and bash/coreutils. Entry point starts the display and a window manager, then blocks so `docker exec` can attach commands.
+
+### Use it
+
+```ts
+import { DockerExecutor, runAgenticLoop } from "@/agent";
+
+const executor = new DockerExecutor({
+  image: "strand-sandbox:latest",
+  containerName: "strand-sandbox",
+  workdir: "/tmp/strand-work",
+  autoStart: true,          // pull + run on first action
+  defaultTimeoutMs: 30_000,
+});
+
+// After you have verified the container has no secrets mounted, no host
+// network, and nothing else worth caring about on the filesystem:
+executor.markSafe();
+
+await runAgenticLoop({
+  provider,
+  model: "claude-opus-4-7",
+  messages: [{ role: "user", content: "open a browser and go to example.com" }],
+  executor,
+});
+
+await executor.stop();
+```
+
+### Safety
+
+- `executor.safe` starts `false`. Policy code that gates on `safe === true` must refuse to run the executor until the operator has explicitly called `markSafe()`.
+- Every action is logged via `log.info({ svc: "exec", exec: "docker", op, args })`.
+- Arguments go through `execFile` as argv — no shell interpolation, no user-controlled strings fed into bash.
+- `bash()` caps commands at 16KB input and truncates stdout at 64KB.
+- Run the container with `--network=none` (or an isolated network) when in gated/live modes. Never mount secrets. Never share the host Docker socket.
+
+### VNC observation (optional)
+
+Publish port 5900 only when you want to watch (and only behind a trusted network — the entrypoint disables VNC auth):
+
+```bash
+docker run --rm -d --name strand-sandbox -p 127.0.0.1:5900:5900 strand-sandbox:latest
+# then point a VNC client at vnc://127.0.0.1:5900
+```
+
 ## Non-negotiable
 
 Read `CLAUDE.md`. The policy gate is not bypassable. DMs to non-mutuals: never. All DMs require human review during ramp-up.
