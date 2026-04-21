@@ -1,0 +1,45 @@
+# Banned exemplar tweets — used by src/util/prefilter.ts as a semantic-similarity
+# reject corpus. Each entry is a synthetic or paraphrased example of a tweet
+# pattern we never want @strand to emit. The prefilter computes embeddings of
+# candidate text against these exemplars; cosine similarity >= 0.8 rejects the
+# candidate before the xAI Responses API call (avoids the $0.05 refusal tax).
+#
+# Keep entries generic, obviously undesirable, and stylistically distinct from
+# on-persona technical content. Do NOT include real tweet URLs or real handles.
+
+exemplars:
+  - reason: dm_solicitation
+    text: "DM me now for guaranteed 10x gains on my private signals group, limited spots."
+
+  - reason: scam_airdrop
+    text: "Free $SOLANA airdrop live for the next 24h, connect your wallet here to claim before it ends."
+
+  - reason: engagement_farm_reply_bait
+    text: "What's your favorite programming language? Reply below and I'll RT the best answers!"
+
+  - reason: impersonation
+    text: "I am the official Elon Musk backup account, follow me for unreleased Tesla news before anyone else."
+
+  - reason: reply_guy_empty
+    text: "This is exactly why I love this community so much. You all are the best 🙏🙏🙏"
+
+  - reason: promo_spam_link
+    text: "🚀 Just dropped my new ebook on how to 10x your Twitter in 30 days, grab it here: https://t.co/example"
+
+  - reason: political_bait
+    text: "If you voted for the current president you are actively destroying this country, change my mind."
+
+  - reason: engagement_farm_rt_if
+    text: "RT if you agree that hustle culture is the only way to win. Like if you're still grinding at 3am."
+
+  - reason: hate_adjacent
+    text: "People from that country are ruining tech, we need to ban them from every company immediately."
+
+  - reason: medical_advice
+    text: "Skip the doctor and take 5000iu of vitamin D plus ivermectin daily, cured my covid in two days."
+
+  - reason: thread_bait
+    text: "🧵 1/ I spent 10,000 hours studying billionaires and here are the 17 habits that changed my life forever."
+
+  - reason: crypto_price_shill
+    text: "$DOGE to $1 by end of month, easy. If you're not loading up now you're going to regret it forever."
