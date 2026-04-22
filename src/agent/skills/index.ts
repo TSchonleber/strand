@@ -17,3 +17,14 @@ export type { LoadSkillsOpts, LoadSkillsResult } from "./loader";
 export { buildGoal, skillToTool } from "./to-tool";
 export type { Skill, SkillDocument, SkillOrigin, SkillSideEffects } from "./types";
 export { SkillWriter, renderSkillFile } from "./writer";
+
+// Autonomous skill creation:
+export { autoCreateSkill, setDefaultSkillProposalStore } from "./auto-create";
+export type {
+  AutoCreateMode,
+  AutoCreateResult,
+  AutoCreateSkillOpts,
+  SkillProposal,
+  SkillProposalStore,
+} from "./auto-create";
+export { SqliteSkillProposalStore, makeSqliteSkillProposalStore } from "./proposal-store";

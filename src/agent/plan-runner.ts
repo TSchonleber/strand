@@ -13,6 +13,8 @@ import {
   STEP_CACHE_KEY,
   STEP_SYSTEM,
 } from "./prompts";
+import { autoCreateSkill } from "./skills/auto-create";
+import type { AutoCreateSkillOpts } from "./skills/auto-create";
 import type {
   AgentContext,
   PlanRunResult,
@@ -62,6 +64,13 @@ export interface RunPlanOpts {
    * Default: no compaction. Plug in a SummarizingContextEngine for long runs.
    */
   contextEngine?: ContextEngine;
+  /**
+   * Autonomous skill creation after a successful plan. Default: off.
+   *   - mode="manual": proposal + queue for `strand skills pending approve`
+   *   - mode="auto":   non-destructive skills installed directly; destructive
+   *                    still queue regardless.
+   */
+  autoCreateSkill?: AutoCreateSkillOpts;
 }
 
 const EMPTY_USAGE: LlmUsage = {
@@ -358,7 +367,7 @@ export async function runPlan(opts: RunPlanOpts): Promise<PlanRunResult> {
     "plan.complete",
   );
 
-  return {
+  const result: PlanRunResult = {
     graphId,
     rootGoal: goal,
     status: finalStatus,
@@ -369,6 +378,33 @@ export async function runPlan(opts: RunPlanOpts): Promise<PlanRunResult> {
     durationMs: Date.now() - t0,
     stopReason,
   };
+
+  // Autonomous skill creation hook — runs after the graph is final.
+  // Failure is non-fatal; we never let skill creation drop the plan result.
+  if (opts.autoCreateSkill && opts.autoCreateSkill.mode !== "off") {
+    try {
+      const outcome = await autoCreateSkill({ ctx, plan: result, opts: opts.autoCreateSkill });
+      if (outcome.attempted) {
+        log.info(
+          {
+            svc: "agent",
+            op: "autoskill",
+            graphId,
+            installed: Boolean(outcome.installed),
+            proposalId: outcome.proposalId ?? null,
+          },
+          outcome.installed ? "skill.auto_installed" : "skill.auto_proposal_queued",
+        );
+      }
+    } catch (err) {
+      log.warn(
+        { err: err instanceof Error ? err.message : String(err), graphId },
+        "skill.auto_create.uncaught",
+      );
+    }
+  }
+
+  return result;
 }
 
 /**

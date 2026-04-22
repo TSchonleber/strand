@@ -150,3 +150,18 @@ CREATE TABLE IF NOT EXISTS agent_tool_invocations (
   at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_agent_tool_invocations_graph ON agent_tool_invocations(graph_id, step_id);
+
+CREATE TABLE IF NOT EXISTS agent_skill_proposals (
+  id TEXT PRIMARY KEY,
+  graph_id TEXT,                    -- source TaskGraph id (nullable)
+  proposed_name TEXT NOT NULL,
+  proposed_description TEXT NOT NULL,
+  proposed_doc_json TEXT NOT NULL,  -- full SkillDocument JSON
+  status TEXT NOT NULL,             -- pending | approved | rejected | installed
+  reasoning TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  decided_at TEXT,
+  decided_by TEXT                   -- 'auto' | 'human' | NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_skill_proposals_status ON agent_skill_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_agent_skill_proposals_created ON agent_skill_proposals(created_at);

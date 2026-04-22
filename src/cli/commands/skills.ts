@@ -139,6 +139,102 @@ export function registerSkillsCmd(program: Command, _ctx: CliContext): void {
       printLine(`removed ${join(dir, `${name}.skill.md`)}`);
     });
 
+  // ─── Pending queue (autonomous skill creation) ─────────────────────────
+  const pendingCmd = skillsCmd
+    .command("pending")
+    .description("manage queued skill proposals from autonomous creation");
+
+  pendingCmd
+    .command("list")
+    .description("list pending skill proposals")
+    .option("-s, --status <s>", "pending | approved | rejected | installed", "pending")
+    .action(async (opts: { status: string }) => {
+      const agent = await import("@/agent");
+      const store = agent.makeSqliteSkillProposalStore();
+      const status = opts.status as "pending" | "approved" | "rejected" | "installed";
+      const proposals = await store.listByStatus(status);
+      if (proposals.length === 0) {
+        printLine(`no ${status} proposals`);
+        return;
+      }
+      printTable(proposals, [
+        { header: "id", value: (p) => p.id, maxWidth: 28 },
+        { header: "name", value: (p) => p.proposedName, maxWidth: 24 },
+        { header: "side", value: (p) => p.proposedDoc.sideEffects ?? "local", maxWidth: 11 },
+        { header: "created", value: (p) => p.createdAt.slice(0, 19), maxWidth: 20 },
+        { header: "reasoning", value: (p) => truncate(p.reasoning, 60), maxWidth: 60 },
+      ]);
+    });
+
+  pendingCmd
+    .command("show")
+    .description("print a proposal's full SkillDocument + reasoning")
+    .argument("<id>")
+    .action(async (id: string) => {
+      const agent = await import("@/agent");
+      const store = agent.makeSqliteSkillProposalStore();
+      const p = await store.load(id);
+      if (!p) {
+        printErr(`not found: ${id}`);
+        process.exit(1);
+      }
+      printLine(`id: ${p.id}`);
+      printLine(`status: ${p.status}`);
+      printLine(`name: ${p.proposedName}`);
+      printLine(`description: ${p.proposedDescription}`);
+      printLine(`sideEffects: ${p.proposedDoc.sideEffects ?? "local"}`);
+      printLine(`requiresLive: ${Boolean(p.proposedDoc.requiresLive)}`);
+      printLine(`allowedTools: ${(p.proposedDoc.allowedTools ?? []).join(", ") || "(none)"}`);
+      printLine(`reasoning: ${p.reasoning}`);
+      printLine("---");
+      printLine("body:");
+      printLine(p.proposedDoc.body);
+    });
+
+  pendingCmd
+    .command("approve")
+    .description("install a pending proposal as a skill")
+    .argument("<id>")
+    .option("--dir <path>", "target dir (default ./.strand/skills)")
+    .action(async (id: string, opts: { dir?: string }) => {
+      const agent = await import("@/agent");
+      const store = agent.makeSqliteSkillProposalStore();
+      const p = await store.load(id);
+      if (!p) {
+        printErr(`not found: ${id}`);
+        process.exit(1);
+      }
+      if (p.status !== "pending") {
+        printErr(`not pending: ${id} (status=${p.status})`);
+        process.exit(1);
+      }
+      const dir = resolve(opts.dir ?? projectDir());
+      const writer = new agent.SkillWriter(dir);
+      const { path } = await writer.write(p.proposedDoc);
+      await store.updateStatus(id, "installed", "human");
+      printLine(`installed ${p.proposedName} → ${path}`);
+    });
+
+  pendingCmd
+    .command("reject")
+    .description("mark a proposal rejected (no disk write)")
+    .argument("<id>")
+    .action(async (id: string) => {
+      const agent = await import("@/agent");
+      const store = agent.makeSqliteSkillProposalStore();
+      const p = await store.load(id);
+      if (!p) {
+        printErr(`not found: ${id}`);
+        process.exit(1);
+      }
+      if (p.status !== "pending") {
+        printErr(`not pending: ${id} (status=${p.status})`);
+        process.exit(1);
+      }
+      await store.updateStatus(id, "rejected", "human");
+      printLine(`rejected ${p.proposedName}`);
+    });
+
   skillsCmd
     .command("validate")
     .description("load all skills and report parse errors")

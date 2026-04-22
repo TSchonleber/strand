@@ -85,17 +85,26 @@ export * as tools from "./tools";
 // Skills (procedural memory as files, loaded as Tools):
 export {
   SkillWriter,
+  SqliteSkillProposalStore,
+  autoCreateSkill,
   buildGoal,
   loadSkills,
+  makeSqliteSkillProposalStore,
   parseSkill,
   renderSkillFile,
+  setDefaultSkillProposalStore,
   skillToTool,
 } from "./skills";
 export type {
+  AutoCreateMode,
+  AutoCreateResult,
+  AutoCreateSkillOpts,
   LoadSkillsOpts,
   LoadSkillsResult,
   Skill,
   SkillDocument,
   SkillOrigin,
+  SkillProposal,
+  SkillProposalStore,
   SkillSideEffects,
 } from "./skills";

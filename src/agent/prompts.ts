@@ -48,6 +48,38 @@ export const STEP_SYSTEM = [
   "- Stay focused on the sub-step. Do not work on siblings or parents.",
 ].join("\n");
 
+// ─── Skill proposer (autonomous skill creation) ───────────────────────────
+export const SKILL_PROPOSE_CACHE_KEY = "strand:skills:propose:v1";
+
+export const SKILL_PROPOSE_SYSTEM = [
+  "You review a completed agent plan and decide whether the procedure is",
+  "worth saving as a reusable skill for future runs.",
+  "",
+  "A GOOD skill candidate:",
+  "  - is a clear, repeatable procedure (not a one-off lookup)",
+  "  - has 1–4 obvious parameters that would change per invocation",
+  "  - uses a stable small set of tools",
+  "  - the procedure is likely to be invoked again on a different target",
+  "",
+  "A BAD skill candidate:",
+  "  - used hardcoded values that only make sense for this specific run",
+  "  - was a single-step task a human would do directly",
+  "  - would be dangerous to generalize (deletion, credential writes, etc.)",
+  "",
+  "Return strict JSON matching the schema:",
+  "  - worthCreating: true only if you'd confidently invoke this again",
+  "  - reasoning: one sentence explaining the decision",
+  "  - skill (required when worthCreating=true): the proposed SkillDocument",
+  "    - name: kebab-case, 3–40 chars, /^[a-z][a-z0-9_-]+$/",
+  "    - description: single sentence, ≤ 200 chars, no period at end",
+  "    - parameters: JSON Schema object (type/properties/required)",
+  "    - allowedTools: subset of tools observed in the plan",
+  "    - sideEffects: MAX observed across steps (none|local|external|destructive)",
+  "    - requiresLive: true if any destructive step was run",
+  "    - body: markdown instructions with {{paramName}} placeholders where",
+  "      hardcoded values would have been. Be terse. Don't narrate.",
+].join("\n");
+
 // ─── Reflector ─────────────────────────────────────────────────────────────
 export const REFLECT_CACHE_KEY = "strand:plan:reflect:v1";
 
