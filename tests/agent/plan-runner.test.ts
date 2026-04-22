@@ -39,10 +39,14 @@ function makeResult<T>(
  * for deterministic plan-runner tests where we want to control exactly what
  * the LLM "says" at each call site.
  */
-function scriptedProvider(script: Array<LlmResult<unknown>>): LlmProvider {
+interface ScriptedProvider extends LlmProvider {
+  calls: LlmCall[];
+}
+
+function scriptedProvider(script: Array<LlmResult<unknown>>): ScriptedProvider {
   let i = 0;
   const calls: LlmCall[] = [];
-  const provider: LlmProvider & { calls: LlmCall[] } = {
+  const provider: ScriptedProvider = {
     name: "scripted",
     capabilities: {
       structuredOutput: true,
@@ -92,6 +96,95 @@ function makeCtx(provider: LlmProvider): AgentContext {
     depth: 0,
   };
 }
+
+describe("runPlan — prompt cache hygiene (shared-prefix stability)", () => {
+  function buildScript(): ScriptedProvider {
+    return scriptedProvider([
+      makeResult("", { steps: [{ goal: "A1", allowedTools: ["echo"] }] }),
+      makeResult("A-did-step", null),
+      makeResult("", { achieved: true, reasoning: "ok" }),
+      makeResult("", { steps: [{ goal: "B1", allowedTools: ["echo"] }] }),
+      makeResult("B-did-step", null),
+      makeResult("", { achieved: true, reasoning: "ok" }),
+    ]);
+  }
+
+  it("decompose system prompt is identical across runs with different goals", async () => {
+    const provider = buildScript();
+    await runPlan({ ctx: makeCtx(provider), goal: "alpha goal completely different" });
+    await runPlan({ ctx: makeCtx(provider), goal: "bravo different completely goal" });
+
+    const decomposeA = provider.calls[0]?.messages[0]?.content;
+    const decomposeB = provider.calls[3]?.messages[0]?.content;
+    expect(decomposeA).toBe(decomposeB);
+    expect(decomposeA).toContain("plan decomposition expert");
+    expect(decomposeA).not.toContain("alpha");
+    expect(decomposeA).not.toContain("bravo");
+  });
+
+  it("step system prompt is identical across steps with different goals", async () => {
+    const provider = buildScript();
+    await runPlan({ ctx: makeCtx(provider), goal: "alpha" });
+    await runPlan({ ctx: makeCtx(provider), goal: "bravo" });
+
+    const stepA = provider.calls[1]?.messages[0]?.content;
+    const stepB = provider.calls[4]?.messages[0]?.content;
+    expect(stepA).toBe(stepB);
+    expect(stepA).toContain("sub-agent");
+    expect(stepA).not.toContain("A1");
+    expect(stepA).not.toContain("B1");
+  });
+
+  it("every plan call sets a stable promptCacheKey", async () => {
+    const provider = buildScript();
+    await runPlan({ ctx: makeCtx(provider), goal: "alpha" });
+
+    const keys = provider.calls.slice(0, 3).map((c) => c.promptCacheKey);
+    expect(keys).toEqual([
+      "strand:plan:decompose:v1",
+      "strand:plan:step:v1",
+      "strand:plan:reflect:v1",
+    ]);
+  });
+
+  it("tool catalog in decompose is sorted lexicographically", async () => {
+    const provider = scriptedProvider([
+      makeResult("", { steps: [{ goal: "g", allowedTools: ["echo"] }] }),
+      makeResult("done", null),
+      makeResult("", { achieved: true, reasoning: "ok" }),
+    ]);
+
+    const ctx = makeCtx(provider);
+    ctx.tools.register({
+      name: "zebra",
+      description: "z tool",
+      parameters: { type: "object" },
+      async execute() {
+        return "z";
+      },
+    });
+    ctx.tools.register({
+      name: "alpha_tool",
+      description: "a tool",
+      parameters: { type: "object" },
+      async execute() {
+        return "a";
+      },
+    });
+
+    await runPlan({ ctx, goal: "do a thing" });
+
+    const decomposeUser = (provider.calls[0]?.messages[1]?.content ?? "") as string;
+    const alphaIdx = decomposeUser.indexOf("alpha_tool");
+    const echoIdx = decomposeUser.indexOf("echo");
+    const zebraIdx = decomposeUser.indexOf("zebra");
+    expect(alphaIdx).toBeGreaterThan(-1);
+    expect(echoIdx).toBeGreaterThan(-1);
+    expect(zebraIdx).toBeGreaterThan(-1);
+    expect(alphaIdx).toBeLessThan(echoIdx);
+    expect(echoIdx).toBeLessThan(zebraIdx);
+  });
+});
 
 describe("runPlan — happy path", () => {
   it("decomposes, executes each step, reflects, completes", async () => {

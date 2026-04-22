@@ -9,6 +9,7 @@
 
 import { Command } from "commander";
 import { registerBudgetCmd } from "./commands/budget";
+import { registerCacheCmd } from "./commands/cache";
 import { registerConfigCmd } from "./commands/config";
 import { registerDevCmd } from "./commands/dev";
 import { registerKeysCmd } from "./commands/keys";
@@ -52,6 +53,7 @@ async function main(): Promise<number> {
   registerReviewCmd(program, ctx);
   registerTasksCmd(program, ctx);
   registerBudgetCmd(program, ctx);
+  registerCacheCmd(program, ctx);
   registerToolsCmd(program, ctx);
   registerKeysCmd(program, ctx);
   registerOauthCmd(program, ctx);

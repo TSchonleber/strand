@@ -279,6 +279,7 @@ export async function grokCall<T = unknown>(input: GrokCallInput): Promise<GrokC
 
   const toolCalls = extractToolCalls(resp);
 
+  const cacheRatio = usage.inputTokens > 0 ? usage.cachedInputTokens / usage.inputTokens : 0;
   log.info(
     {
       svc: "grok",
@@ -287,6 +288,8 @@ export async function grokCall<T = unknown>(input: GrokCallInput): Promise<GrokC
       system_fingerprint: systemFingerprint,
       durationMs: Date.now() - t0,
       usage,
+      cache_ratio: Math.round(cacheRatio * 100) / 100,
+      prompt_cache_key: input.promptCacheKey ?? null,
       tool_calls: toolCalls.length,
     },
     "grok.call",

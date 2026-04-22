@@ -128,6 +128,7 @@ export const DEFAULT_COMMANDS: WelcomeEntry[] = [
   { name: "status", description: "orchestrator + runs summary" },
   { name: "tasks", description: "inspect persisted task graphs" },
   { name: "budget", description: "spend + limits" },
+  { name: "cache", description: "prompt-cache hit rates" },
   { name: "tools list", description: "show registered tools" },
   { name: "keys", description: "credential CRUD" },
   { name: "oauth x", description: "X OAuth 2.0 PKCE flow" },

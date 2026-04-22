@@ -451,6 +451,7 @@ export function makeAnthropicProvider(opts: AnthropicProviderOptions): LlmProvid
       }
     }
 
+    const cacheRatio = usage.inputTokens > 0 ? usage.cachedInputTokens / usage.inputTokens : 0;
     log.info(
       {
         svc: "anthropic",
@@ -458,6 +459,8 @@ export function makeAnthropicProvider(opts: AnthropicProviderOptions): LlmProvid
         response_id: responseId,
         durationMs: Date.now() - t0,
         usage,
+        cache_ratio: Math.round(cacheRatio * 100) / 100,
+        prompt_cache_key: input.promptCacheKey ?? null,
         tool_calls: toolCalls.length,
       },
       "anthropic.call",

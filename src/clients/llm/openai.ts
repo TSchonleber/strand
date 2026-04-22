@@ -215,6 +215,7 @@ export function makeOpenAiProvider(opts: {
 
     const toolCalls = extractToolCalls(message);
 
+    const cacheRatio = usage.inputTokens > 0 ? usage.cachedInputTokens / usage.inputTokens : 0;
     log.info(
       {
         svc: "openai",
@@ -223,6 +224,8 @@ export function makeOpenAiProvider(opts: {
         system_fingerprint: systemFingerprint,
         durationMs: Date.now() - t0,
         usage,
+        cache_ratio: Math.round(cacheRatio * 100) / 100,
+        prompt_cache_key: input.promptCacheKey ?? null,
         tool_calls: toolCalls.length,
       },
       "openai.call",

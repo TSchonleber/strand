@@ -1,8 +1,16 @@
 import { randomUUID } from "node:crypto";
-import type { LlmCall, LlmMessage, LlmUsage } from "@/clients/llm";
+import type { LlmMessage, LlmUsage } from "@/clients/llm";
 import { log } from "@/util/log";
 import { localToolsForAgent } from "./context";
 import { runAgenticLoop } from "./loop";
+import {
+  DECOMPOSE_CACHE_KEY,
+  DECOMPOSE_SYSTEM,
+  REFLECT_CACHE_KEY,
+  REFLECT_SYSTEM,
+  STEP_CACHE_KEY,
+  STEP_SYSTEM,
+} from "./prompts";
 import type {
   AgentContext,
   PlanRunResult,
@@ -10,6 +18,7 @@ import type {
   StepStatus,
   TaskGraph,
   TaskGraphStore,
+  Tool,
 } from "./types";
 import { BudgetExceededError } from "./types";
 
@@ -354,38 +363,49 @@ export async function runPlan(opts: RunPlanOpts): Promise<PlanRunResult> {
   };
 }
 
+/**
+ * Render the tool catalog deterministically — sorted by name so registration
+ * order can never bust the prompt cache. Cached per registry snapshot.
+ */
+function renderToolCatalog(tools: readonly Tool[]): string {
+  if (tools.length === 0) return "(none registered)";
+  return [...tools]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((t) => `- ${t.name}: ${t.description} (side_effects=${t.sideEffects ?? "none"})`)
+    .join("\n");
+}
+
 async function decompose(
   ctx: AgentContext,
   goal: string,
   maxSteps: number,
 ): Promise<DecomposedPlan> {
-  const tools = ctx.tools.list();
-  const toolCatalog = tools
-    .map((t) => `- ${t.name}: ${t.description} (side_effects=${t.sideEffects ?? "none"})`)
-    .join("\n");
+  // Prompt cache hygiene: the system prompt is a byte-stable constant.
+  // Dynamic content (tool catalog, maxSteps, goal) lives in USER messages.
+  // Catalog is sorted so insertion order can't bust the cache.
+  const toolCatalog = renderToolCatalog(ctx.tools.list());
 
-  const systemPrompt = [
-    "You are a plan decomposition expert for an autonomous agent.",
-    `Break the user's goal into 2–${maxSteps} discrete steps. Each step must be actionable with the listed tools.`,
-    "For each step, list ONLY the tool names the agent actually needs — keep the allowlist tight.",
-    "Return strict JSON matching the schema.",
-    "",
-    "Available tools:",
-    toolCatalog || "(none registered)",
-  ].join("\n");
-
-  const call: LlmCall = {
+  const result = await ctx.provider.chat<DecomposedPlan>({
     model: modelFor(ctx),
     messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: goal },
+      { role: "system", content: DECOMPOSE_SYSTEM },
+      {
+        role: "user",
+        content: [
+          `Available tools (${ctx.tools.list().length}):`,
+          toolCatalog,
+          "",
+          `Target step count: 2–${maxSteps}. Prefer 3–5.`,
+        ].join("\n"),
+      },
+      { role: "user", content: `Goal:\n${goal}` },
     ],
+    promptCacheKey: DECOMPOSE_CACHE_KEY,
     structuredOutput: { name: "DecomposedPlan", schema: DECOMPOSE_SCHEMA, strict: true },
     maxOutputTokens: 1500,
-  };
-
-  const result = await ctx.provider.chat<DecomposedPlan>(call);
+  });
   ctx.budget.consumeUsage(result.usage);
+  logCacheRatio("decompose", result.usage);
 
   const parsed = result.parsed ?? safeJson<DecomposedPlan>(result.outputText);
   if (!parsed || !Array.isArray(parsed.steps)) {
@@ -410,24 +430,29 @@ async function executeStep(args: {
   const { ctx, goal, rootGoal, maxIterations, retryAdvice } = args;
   const localTools = localToolsForAgent(ctx);
 
-  const systemContent = [
-    "You are working on a sub-step of a larger goal.",
-    `Root goal: ${rootGoal}`,
-    `Current sub-step: ${goal}`,
-    `Available tools: ${
-      ctx.tools
-        .list()
-        .map((t) => t.name)
-        .join(", ") || "none"
-    }`,
-    "When the sub-step is complete, return a short summary of what you did.",
-    retryAdvice ? `\nPrevious attempt feedback: ${retryAdvice}` : "",
-  ].join("\n");
+  // Prompt cache hygiene: STEP_SYSTEM is byte-stable. All dynamic content
+  // (root goal, sub-step goal, tool list, retry advice) lives in user
+  // messages so the shared prefix hits cache across every step of every
+  // run — parent and spawned children alike.
+  const toolNames = [...ctx.tools.list()]
+    .map((t) => t.name)
+    .sort()
+    .join(", ");
 
   const messages: LlmMessage[] = [
-    { role: "system", content: systemContent },
-    { role: "user", content: goal },
+    { role: "system", content: STEP_SYSTEM },
+    {
+      role: "user",
+      content: [`Root goal: ${rootGoal}`, `Available tools: ${toolNames || "none"}`].join("\n"),
+    },
+    { role: "user", content: `Sub-step:\n${goal}` },
   ];
+  if (retryAdvice) {
+    messages.push({
+      role: "user",
+      content: `Previous attempt feedback:\n${retryAdvice}`,
+    });
+  }
 
   try {
     const loop = await runAgenticLoop({
@@ -436,11 +461,13 @@ async function executeStep(args: {
       messages,
       localTools,
       maxIterations,
+      promptCacheKey: STEP_CACHE_KEY,
       ...(ctx.executor !== undefined ? { executor: ctx.executor } : {}),
       ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
     });
 
     ctx.budget.consumeUsage(loop.usage);
+    logCacheRatio("step", loop.usage);
     const reflection = await reflect(ctx, goal, loop.finalText);
     return {
       output: loop.finalText,
@@ -465,28 +492,22 @@ async function executeStep(args: {
 }
 
 async function reflect(ctx: AgentContext, goal: string, output: string): Promise<Reflection> {
-  const systemPrompt = [
-    "You are a strict reviewer. Given a sub-step goal and the agent's output,",
-    "decide whether the goal was achieved. Return strict JSON matching the schema.",
-    "- achieved: true ONLY if the output demonstrates the goal is complete.",
-    "- reasoning: one concise sentence.",
-    "- retryAdvice: if not achieved, one actionable sentence for the next attempt.",
-  ].join("\n");
-
   try {
     const result = await ctx.provider.chat<Reflection>({
       model: modelFor(ctx),
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: REFLECT_SYSTEM },
         {
           role: "user",
           content: `Goal: ${goal}\n\nOutput:\n${output.slice(0, 2000)}`,
         },
       ],
+      promptCacheKey: REFLECT_CACHE_KEY,
       structuredOutput: { name: "Reflection", schema: REFLECT_SCHEMA, strict: true },
       maxOutputTokens: 400,
     });
     ctx.budget.consumeUsage(result.usage);
+    logCacheRatio("reflect", result.usage);
     const parsed = result.parsed ?? safeJson<Reflection>(result.outputText);
     if (!parsed) {
       return { achieved: false, reasoning: "reflection parse failed — assuming unachieved" };
@@ -499,6 +520,28 @@ async function reflect(ctx: AgentContext, goal: string, output: string): Promise
       reasoning: `reflection threw: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+}
+
+/**
+ * Emit the per-call cache-hit ratio so operators can spot prefix drift
+ * immediately. Anything below ~0.3 on the 2nd+ call is usually a bug
+ * (dynamic junk leaked into the system prompt, or tool order churning).
+ */
+function logCacheRatio(site: "decompose" | "step" | "reflect", usage: LlmUsage): void {
+  const input = usage.inputTokens || 1;
+  const cached = usage.cachedInputTokens;
+  const ratio = Math.round((cached / input) * 100) / 100;
+  log.debug(
+    {
+      svc: "agent",
+      op: "cache_ratio",
+      site,
+      inputTokens: usage.inputTokens,
+      cachedInputTokens: cached,
+      ratio,
+    },
+    "plan.cache_ratio",
+  );
 }
 
 function modelFor(ctx: AgentContext): string {

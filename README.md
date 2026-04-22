@@ -8,11 +8,12 @@ LLM: xAI · OpenAI-compatible (+ Ollama/Groq/Together/LM Studio) · Anthropic ·
 
 ```bash
 strand run "summarize the README and commit a rewrite"   # one-shot agentic plan
-strand tui                       # live TUI: active graphs + runs + tool stream
+strand tui                       # welcome splash · [d] live dashboard
 strand status                    # orchestrator + reasoner/consolidator summary
 strand tasks list                # persisted TaskGraphs
 strand tasks show <id>           # graph + steps + reflections
 strand budget                    # configured + observed spend (last 24h)
+strand cache                     # prompt-cache hit rates + drift warnings
 strand tools list                # registered built-in tools
 strand keys set XAI_API_KEY      # BYOK — write credential
 strand oauth x                   # X OAuth 2.0 PKCE → atomic store write
@@ -22,6 +23,17 @@ strand smoke                     # integration smoke
 ```
 
 Full help: `strand --help` (or `pnpm strand --help` in dev).
+
+### Prompt cache hygiene
+
+Most agent bills come from busted prefix caches — children and retries that change the reusable prefix. Strand optimizes for **shared-prefix, branch-at-the-tail**:
+
+- `decompose` / `step` / `reflect` all use byte-stable static system prompts declared in `src/agent/prompts.ts`. Dynamic content (goals, tool lists, repo context) lives in **user** messages, never the system.
+- Tool catalogs rendered to the LLM are sorted lexicographically so registration order can't bust the cache.
+- Every call sets a stable `promptCacheKey`: `strand:plan:{decompose,step,reflect}:v1`, `strand:reasoner:v1`, `strand:consolidator:v1`, `strand:composer:<kind>:v1`.
+- Anthropic adapter places `cache_control: {type:"ephemeral"}` breakpoints at the end of the shared system AND at the last message — the two-breakpoint pattern that covers shared-prefix reuse AND intra-loop continuation.
+- Every adapter's `chat.call` log now includes `cache_ratio` + `prompt_cache_key` so you can watch for drift in real time.
+- `strand cache` aggregates `reasoner_runs.usage_json` over a window, shows the hit rate, and flags drift when it drops below 30 % over 5 + ticks.
 
 ## Architecture
 
