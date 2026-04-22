@@ -99,7 +99,7 @@ describe("SummarizingContextEngine", () => {
   });
 
   it("compacts when input tokens cross threshold", async () => {
-    let summaryCallInput: LlmCall | null = null;
+    const captured: LlmCall[] = [];
     const engine = new SummarizingContextEngine({
       thresholdRatio: 0.5,
       keepTailTurns: 4,
@@ -109,7 +109,7 @@ describe("SummarizingContextEngine", () => {
       maxContextTokens: 1000,
       summaryText: "[compacted context]\nCompacted. Fs found X. Wrote Y.",
       onCall: (input) => {
-        summaryCallInput = input;
+        captured.push(input);
       },
     });
     const msgs = bigConversation(20); // 42 messages total (2 sys + 40)
@@ -131,8 +131,9 @@ describe("SummarizingContextEngine", () => {
     // Tail preserved verbatim: the last 4 messages (== keepTailTurns).
     expect(r.messages.slice(-4)).toEqual(msgs.slice(-4));
     // Summary call had our stable cache key + static system prompt.
-    expect(summaryCallInput?.promptCacheKey).toBe("strand:context:compress:v1");
-    expect(summaryCallInput?.messages[0]?.role).toBe("system");
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.promptCacheKey).toBe("strand:context:compress:v1");
+    expect(captured[0]?.messages[0]?.role).toBe("system");
   });
 
   it("does not compact when middle is smaller than keepTail+min", async () => {
