@@ -29,6 +29,11 @@ agent:
   maxDepth: 3             # max spawn() recursion
   maxSteps: 5             # max PlanSteps per runPlan
   maxIterationsPerStep: 4 # agentic-loop iterations per step
+  contextEngine:
+    kind: noop            # noop | summarizing
+    thresholdRatio: 0.75  # compact when input tokens > ratio × maxContext
+    keepTailTurns: 8      # keep the last N turns verbatim
+    summarizerMaxOutputTokens: 800
 
 orchestrator:
   perceiverMs: 120000     # 2 min

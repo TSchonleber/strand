@@ -15,6 +15,7 @@
 import type { LlmProvider } from "@/clients/llm";
 import type { LlmCall, LlmMessage, LlmResult, LlmTool, LlmUsage } from "@/clients/llm";
 import type { LlmFunctionTool, LlmToolCall } from "@/clients/llm/types";
+import type { ContextEngine } from "./context-engine";
 import type { ComputerExecutor, MouseButton, ScrollDirection } from "./executor";
 
 export interface LocalTool<TArgs = unknown, TResult = unknown> {
@@ -53,6 +54,12 @@ export interface LoopInput extends Omit<LlmCall, "tools"> {
   executor?: ComputerExecutor;
   /** Abort mid-loop. Checked between iterations. */
   signal?: AbortSignal;
+  /**
+   * Optional context compactor. Called before each chat() once the conversation
+   * has grown. Preserves the leading system/tool prefix for cache hygiene.
+   * Default: no compaction.
+   */
+  contextEngine?: ContextEngine;
   metadata?: Record<string, unknown>;
 }
 
@@ -234,6 +241,7 @@ export async function runAgenticLoop(input: LoopInput): Promise<LoopOutput> {
     tools: providerTools = [],
     maxIterations = DEFAULT_MAX_ITERATIONS,
     onIteration,
+    contextEngine,
     ...rest
   } = input;
 
@@ -251,9 +259,10 @@ export async function runAgenticLoop(input: LoopInput): Promise<LoopOutput> {
     ...(metadata !== undefined ? { metadata } : {}),
   };
 
-  const messages: LlmMessage[] = [...rest.messages];
+  let messages: LlmMessage[] = [...rest.messages];
 
   let usage: LlmUsage = { ...EMPTY_USAGE };
+  let lastUsage: LlmUsage | null = null;
   let iterations = 0;
   let toolCallsTotal = 0;
   let finalText = "";
@@ -265,6 +274,37 @@ export async function runAgenticLoop(input: LoopInput): Promise<LoopOutput> {
       stopReason = "abort";
       trace.push({ at: Date.now(), event: "abort", detail: { iterations } });
       break;
+    }
+
+    // Compact before each chat if an engine is plugged in. Happens AFTER the
+    // first iteration (lastUsage is null on the first call — nothing to base
+    // a threshold on yet).
+    if (contextEngine && lastUsage) {
+      try {
+        const r = await contextEngine.maybeCompress({ messages, lastUsage, provider });
+        if (r.compressed) {
+          messages = r.messages;
+          trace.push({
+            at: Date.now(),
+            event: "tool_result",
+            detail: {
+              id: "context.compact",
+              name: contextEngine.name,
+              removed: r.removed,
+              estimatedTokensAfter: r.estimatedTokens,
+            },
+          });
+        }
+      } catch (err) {
+        // Compaction failure is not fatal — log + continue with the original
+        // messages and let the provider reject with context-overflow if that's
+        // what happens.
+        trace.push({
+          at: Date.now(),
+          event: "error",
+          detail: { error: err instanceof Error ? err.message : String(err), phase: "compact" },
+        });
+      }
     }
 
     const callArgs: LlmCall = {
@@ -294,6 +334,7 @@ export async function runAgenticLoop(input: LoopInput): Promise<LoopOutput> {
 
     iterations += 1;
     usage = sumUsage(usage, result.usage);
+    lastUsage = result.usage;
     finalText = result.outputText;
     finalResponseId = result.responseId;
 

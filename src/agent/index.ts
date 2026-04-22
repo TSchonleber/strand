@@ -34,6 +34,18 @@ export type { SpawnArgs } from "./spawn";
 // Budget:
 export { createBudget, DefaultBudget, mergeLimits, remaining } from "./budget";
 
+// Context compaction:
+export {
+  estimateTokens,
+  NoOpContextEngine,
+  SummarizingContextEngine,
+} from "./context-engine";
+export type {
+  CompressResult,
+  ContextEngine,
+  SummarizingContextEngineOpts,
+} from "./context-engine";
+
 // Tool registry:
 export { DefaultToolRegistry } from "./registry";
 

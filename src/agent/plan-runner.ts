@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { LlmMessage, LlmUsage } from "@/clients/llm";
 import { log } from "@/util/log";
 import { localToolsForAgent } from "./context";
+import type { ContextEngine } from "./context-engine";
 import { runAgenticLoop } from "./loop";
 import {
   DECOMPOSE_CACHE_KEY,
@@ -55,6 +56,11 @@ export interface RunPlanOpts {
   onStepComplete?(step: PlanStep, graph: TaskGraph): void | Promise<void>;
   /** Graph metadata (tenant id, source webhook, etc.) */
   metadata?: Record<string, unknown>;
+  /**
+   * Optional context compactor applied inside each step's agentic loop.
+   * Default: no compaction. Plug in a SummarizingContextEngine for long runs.
+   */
+  contextEngine?: ContextEngine;
 }
 
 const EMPTY_USAGE: LlmUsage = {
@@ -257,6 +263,7 @@ export async function runPlan(opts: RunPlanOpts): Promise<PlanRunResult> {
         goal: step.goal,
         maxIterations: stepIterations,
         rootGoal: goal,
+        ...(opts.contextEngine !== undefined ? { contextEngine: opts.contextEngine } : {}),
       });
       output = r.output;
       usage = r.usage;
@@ -420,6 +427,7 @@ async function executeStep(args: {
   rootGoal: string;
   maxIterations: number;
   retryAdvice?: string;
+  contextEngine?: ContextEngine;
 }): Promise<{
   output: string;
   usage: LlmUsage;
@@ -427,7 +435,7 @@ async function executeStep(args: {
   error?: string;
   reflection: Reflection;
 }> {
-  const { ctx, goal, rootGoal, maxIterations, retryAdvice } = args;
+  const { ctx, goal, rootGoal, maxIterations, retryAdvice, contextEngine } = args;
   const localTools = localToolsForAgent(ctx);
 
   // Prompt cache hygiene: STEP_SYSTEM is byte-stable. All dynamic content
@@ -464,6 +472,7 @@ async function executeStep(args: {
       promptCacheKey: STEP_CACHE_KEY,
       ...(ctx.executor !== undefined ? { executor: ctx.executor } : {}),
       ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
+      ...(contextEngine !== undefined ? { contextEngine } : {}),
     });
 
     ctx.budget.consumeUsage(loop.usage);

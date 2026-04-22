@@ -33,6 +33,14 @@ const AgentConfigSchema = z
     maxDepth: z.number().int().min(1).max(10).default(3),
     maxSteps: z.number().int().min(1).max(20).default(5),
     maxIterationsPerStep: z.number().int().min(1).max(20).default(4),
+    contextEngine: z
+      .object({
+        kind: z.enum(["noop", "summarizing"]).default("noop"),
+        thresholdRatio: z.number().min(0.1).max(0.95).default(0.75),
+        keepTailTurns: z.number().int().min(2).max(50).default(8),
+        summarizerMaxOutputTokens: z.number().int().min(100).max(4000).default(800),
+      })
+      .default({}),
   })
   .default({});
 
