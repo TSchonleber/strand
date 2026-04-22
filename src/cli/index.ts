@@ -13,6 +13,7 @@ import { registerConfigCmd } from "./commands/config";
 import { registerDevCmd } from "./commands/dev";
 import { registerKeysCmd } from "./commands/keys";
 import { registerOauthCmd } from "./commands/oauth";
+import { registerReviewCmd } from "./commands/review";
 import { registerRunCmd } from "./commands/run";
 import { registerSmokeCmd } from "./commands/smoke";
 import { registerStatusCmd } from "./commands/status";
@@ -48,6 +49,7 @@ async function main(): Promise<number> {
   registerRunCmd(program, ctx);
   registerTuiCmd(program, ctx);
   registerStatusCmd(program, ctx);
+  registerReviewCmd(program, ctx);
   registerTasksCmd(program, ctx);
   registerBudgetCmd(program, ctx);
   registerToolsCmd(program, ctx);
