@@ -16,6 +16,7 @@ import { registerKeysCmd } from "./commands/keys";
 import { registerOauthCmd } from "./commands/oauth";
 import { registerReviewCmd } from "./commands/review";
 import { registerRunCmd } from "./commands/run";
+import { registerSkillsCmd } from "./commands/skills";
 import { registerSmokeCmd } from "./commands/smoke";
 import { registerStatusCmd } from "./commands/status";
 import { registerTasksCmd } from "./commands/tasks";
@@ -55,6 +56,7 @@ async function main(): Promise<number> {
   registerBudgetCmd(program, ctx);
   registerCacheCmd(program, ctx);
   registerToolsCmd(program, ctx);
+  registerSkillsCmd(program, ctx);
   registerKeysCmd(program, ctx);
   registerOauthCmd(program, ctx);
   registerConfigCmd(program, ctx);

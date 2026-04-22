@@ -74,3 +74,21 @@ export { BudgetExceededError } from "./types";
 
 // Built-in tools:
 export * as tools from "./tools";
+
+// Skills (procedural memory as files, loaded as Tools):
+export {
+  SkillWriter,
+  buildGoal,
+  loadSkills,
+  parseSkill,
+  renderSkillFile,
+  skillToTool,
+} from "./skills";
+export type {
+  LoadSkillsOpts,
+  LoadSkillsResult,
+  Skill,
+  SkillDocument,
+  SkillOrigin,
+  SkillSideEffects,
+} from "./skills";

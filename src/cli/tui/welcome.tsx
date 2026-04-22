@@ -130,6 +130,7 @@ export const DEFAULT_COMMANDS: WelcomeEntry[] = [
   { name: "budget", description: "spend + limits" },
   { name: "cache", description: "prompt-cache hit rates" },
   { name: "tools list", description: "show registered tools" },
+  { name: "skills", description: "manage procedural skills" },
   { name: "keys", description: "credential CRUD" },
   { name: "oauth x", description: "X OAuth 2.0 PKCE flow" },
   { name: "config show", description: "effective config" },
