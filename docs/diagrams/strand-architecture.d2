@@ -15,11 +15,11 @@ vars: {
 
 title: |md
 # Strand — agent harness
-provider-agnostic LLM · BYOK + OAuth · plan runner + multi-agent spawn · agentic tool loop · computer use · typestate policy gate · brainctl memory
+unified CLI + live TUI · provider-agnostic LLM · BYOK + OAuth · plan runner + multi-agent spawn · agentic tool loop · computer use · typestate policy gate · brainctl memory
 | {
   near: top-center
   shape: text
-  style.font-size: 18
+  style.font-size: 17
   style.bold: true
 }
 
@@ -397,29 +397,28 @@ status: Phase status {
 
   wired: |md
     ### ✓ wired on main
+    • **unified `strand` CLI** — run · tui · status ·
+       tasks · budget · tools · keys · oauth · config ·
+       dev · smoke · review (all Commander subcommands)
+    • **`strand.config.yaml`** consolidates mode +
+       provider + store + budget + agent + orchestrator
+    • **Ink TUI** — live agent tree + run summary +
+       tool invocation stream + keyboard nav
     • typestate gate · reasoner via runAgenticLoop
     • 4 adapters: openai-compat · anthropic · xai · gemini
-    • `llm()` factory + capabilities-driven features
-    • **BYOK credential stores**: env · file · encrypted-file
-       (AES-256-GCM + scrypt) · keychain (@napi-rs/keyring) ·
-       chained · **tenant-scoped** (STRAND_TENANT)
-    • **OAuthCredentialStore** decorator — atomic refresh
+    • BYOK credential stores: env · file · encrypted-file
+       (AES-256-GCM + scrypt) · keychain · chained ·
+       tenant-scoped (STRAND_TENANT)
+    • OAuthCredentialStore decorator — atomic refresh
        + concurrency lock; X strategy preregistered
-    • `pnpm keys` CLI (list/get/set/delete/refresh-oauth)
-    • `runAgenticLoop` — local tool-call iteration runner
-    • **runPlan + spawn** — LLM decomposition, per-step
-       agentic loop, reflection gate + retry, multi-agent
-       child contexts with scoped budgets + tools
-    • **Budget** tracker with linked fork propagation
-    • **ToolRegistry** + **built-in tools**: fs · shell · http
-       · git · brainctl wrappers
-    • **Persistent TaskGraph**: SqliteTaskGraphStore +
+    • runAgenticLoop · runPlan + spawn · Budget with
+       linked fork propagation · ToolRegistry with
+       fs/shell/http/git/brainctl built-ins
+    • Persistent TaskGraph: SqliteTaskGraphStore +
        resumeTaskGraph across restarts
-    • computer-use tool type + Anthropic native mapping
-    • `NoopExecutor` + real `DockerExecutor`
-    • consolidator: file batch · inline batch · sync fallback
-    • consolidatorPoll wired (30 min)
-    • 280 tests · smoke 311 ms · typecheck+biome clean
+    • computer-use: NoopExecutor + real DockerExecutor
+    • consolidator: file batch · inline batch · sync
+    • 293 tests · typecheck+biome clean
   | {
     shape: rectangle
     style.fill: "#064e3b"

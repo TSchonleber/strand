@@ -1,8 +1,27 @@
 # Strand
 
-Autonomous X presence agent. Provider-agnostic LLM reasoning (xAI · OpenAI · Anthropic · Gemini), brainctl-backed long-term memory, X API for action, typestate-enforced policy gate between them.
+Provider-agnostic agent harness. One unified CLI, a plan runner with LLM decomposition + reflection + retry, multi-agent spawn, an agentic tool loop with built-in primitives (fs/shell/http/git/brainctl) + desktop/computer use, persistent TaskGraphs, budget enforcement, typestate policy gate, BYOK credentials with OAuth refresh, and brainctl-backed long-term memory.
 
-Pick a provider with `LLM_PROVIDER` in `.env`. Loops call `llm().chat()` — adapters translate to each provider's native wire format and declare capabilities (structured output, MCP, server-side tools, batch, prompt caching) so features degrade gracefully where unsupported.
+LLM: xAI · OpenAI-compatible (+ Ollama/Groq/Together/LM Studio) · Anthropic · Gemini. Pick with `LLM_PROVIDER`. Adapters translate to each provider's native wire format and declare capabilities — features degrade gracefully where unsupported.
+
+## CLI at a glance
+
+```bash
+strand run "summarize the README and commit a rewrite"   # one-shot agentic plan
+strand tui                       # live TUI: active graphs + runs + tool stream
+strand status                    # orchestrator + reasoner/consolidator summary
+strand tasks list                # persisted TaskGraphs
+strand tasks show <id>           # graph + steps + reflections
+strand budget                    # configured + observed spend (last 24h)
+strand tools list                # registered built-in tools
+strand keys set XAI_API_KEY      # BYOK — write credential
+strand oauth x                   # X OAuth 2.0 PKCE → atomic store write
+strand config show               # effective resolved config
+strand dev                       # boot orchestrator (watch)
+strand smoke                     # integration smoke
+```
+
+Full help: `strand --help` (or `pnpm strand --help` in dev).
 
 ## Architecture
 
@@ -18,23 +37,27 @@ See `docs/ARCHITECTURE.md` for the full technical map (7 Mermaid diagrams, schem
 ## Setup
 
 ```bash
-cp .env.example .env
+cp .env.example .env                       # base env
+cp strand.config.example.yaml strand.config.yaml   # optional — one file for all knobs
 pnpm install
 
 # Pick ONE credential source:
-#   (a) edit .env directly — quickest, works with STRAND_CREDENTIAL_STORE=env (default)
-#   (b) use the pluggable file store — keys never touch .env:
+#   (a) edit .env directly — STRAND_CREDENTIAL_STORE=env (default)
+#   (b) pluggable file store — keys never touch .env:
 #       export STRAND_CREDENTIAL_STORE=file
-#       pnpm keys set XAI_API_KEY
-#       pnpm keys set X_CLIENT_ID
-#       pnpm keys set X_CLIENT_SECRET
-#       pnpm keys list
-# Under `file` mode, credentials persist to ~/.strand/credentials.json (0600).
+#       strand keys set XAI_API_KEY
+#       strand keys set X_CLIENT_ID
+#       strand keys set X_CLIENT_SECRET
+#       strand keys list
 
-pnpm oauth:setup              # X OAuth 2.0 PKCE → atomic token store write
-pnpm memory:bootstrap         # seed brainctl with persona + policies
-pnpm dev                      # boot orchestrator in shadow mode
+strand oauth x              # X OAuth 2.0 PKCE → atomic token store write
+strand dev                  # boot orchestrator (watch mode)
+strand tui                  # live TUI
 ```
+
+### Config file
+
+`strand.config.yaml` consolidates mode / provider / credential store / budget defaults / agent limits / orchestrator cadences / tool workdir / X tier in one place. Resolution order: `--config <path>` → `./strand.config.yaml` → `~/.strand/config.yaml` → built-in defaults. Config merges **under** process env — explicit env vars always win.
 
 ### Bring-your-own-key (BYOK)
 
