@@ -13,6 +13,13 @@ export type {
   ScrollDirection,
   TextEditorCommand,
 } from "./executor";
+export { SSHExecutor, shellQuote as sshShellQuote } from "./executor-ssh";
+export type {
+  SSHClientLike,
+  SSHConnectConfig,
+  SSHExecutorConfig,
+  SSHStreamLike,
+} from "./executor-ssh";
 
 // Agentic loop:
 export { runAgenticLoop } from "./loop";
