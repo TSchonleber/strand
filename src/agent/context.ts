@@ -1,6 +1,21 @@
+import { scanForInjection } from "@/util/injection-scanner";
 import { log } from "@/util/log";
 import type { LocalTool, LoopContext } from "./loop";
 import type { AgentContext, Tool, ToolInvocation } from "./types";
+
+/**
+ * Serialize whatever a tool returned into a string the LLM can consume.
+ * Mirrors runAgenticLoop's own stringifyResult so the scanner sees the same
+ * bytes the model would have seen.
+ */
+function stringifyToolResult(v: unknown): string {
+  if (typeof v === "string") return v;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
 
 /**
  * Bridges the `Tool` (agent-harness) interface to `LocalTool` (loop-runner
@@ -26,7 +41,29 @@ export function toolToLocal(tool: Tool, ctx: AgentContext): LocalTool {
       try {
         if (tool.gate) await tool.gate(args, ctx);
         result = await tool.execute(args, ctx);
-        return result;
+        // Run the (stringified) tool result through the injection scanner
+        // before handing it back to the agentic loop. runAgenticLoop will
+        // call stringifyResult again on whatever we return — returning a
+        // string short-circuits that to the (already sanitized) body.
+        const asString = stringifyToolResult(result);
+        const scanned = scanForInjection(asString);
+        if (!scanned.safe) {
+          log.warn(
+            {
+              svc: "agent",
+              op: "tool_result_injection",
+              tool: tool.name,
+              findings: scanned.findings,
+            },
+            "agent.tool.unsafe_result",
+          );
+          return `[warning: potential prompt-injection in tool output — findings=${scanned.findings
+            .map((f) => f.rule)
+            .join(",")}]\n\n${scanned.sanitized}`;
+        }
+        // If only invisibles were stripped, still prefer the sanitized body —
+        // we don't want bidi overrides leaking into the model's context.
+        return scanned.sanitized;
       } catch (err) {
         errorMsg = err instanceof Error ? err.message : String(err);
         throw err;
