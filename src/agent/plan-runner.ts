@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { LlmMessage, LlmUsage } from "@/clients/llm";
+import { loadContextFiles } from "@/util/context-files";
 import { log } from "@/util/log";
 import { localToolsForAgent } from "./context";
 import type { ContextEngine } from "./context-engine";
@@ -447,14 +448,45 @@ async function executeStep(args: {
     .sort()
     .join(", ");
 
+  // Repository context goes into USER messages, NOT the system prompt.
+  // (See Pass Q cache hygiene note + prompts.ts header: the system prefix
+  // must stay byte-identical across steps of a plan. Burning per-cwd context
+  // into the system prompt is the Hermes anti-pattern we refuse to import.)
+  const workdir =
+    typeof ctx.metadata?.["workdir"] === "string"
+      ? (ctx.metadata["workdir"] as string)
+      : process.cwd();
+  const contextFiles = await loadContextFiles({ cwd: workdir });
+
   const messages: LlmMessage[] = [
     { role: "system", content: STEP_SYSTEM },
     {
       role: "user",
       content: [`Root goal: ${rootGoal}`, `Available tools: ${toolNames || "none"}`].join("\n"),
     },
-    { role: "user", content: `Sub-step:\n${goal}` },
   ];
+  if (contextFiles.content.length > 0) {
+    // Stable across steps of the same plan so the shared USER prefix can
+    // also hit cache (provider-dependent). Omitted entirely when no files
+    // are found — no empty placeholder that would perturb the prefix.
+    messages.push({
+      role: "user",
+      content: `Repository context (from ${contextFiles.sources.join(", ")}):\n\n${contextFiles.content}`,
+    });
+    if (contextFiles.findings.length > 0 || contextFiles.blocked.length > 0) {
+      log.info(
+        {
+          svc: "agent",
+          op: "context_files_scan",
+          sources: contextFiles.sources,
+          blocked: contextFiles.blocked,
+          findingCount: contextFiles.findings.length,
+        },
+        "plan.step.context_files",
+      );
+    }
+  }
+  messages.push({ role: "user", content: `Sub-step:\n${goal}` });
   if (retryAdvice) {
     messages.push({
       role: "user",
