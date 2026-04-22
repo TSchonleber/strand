@@ -27,8 +27,10 @@ const EnvSchema = z.object({
   ANTHROPIC_BASE_URL: z.string().url().optional(),
   GEMINI_API_KEY: z.string().optional(),
 
-  X_CLIENT_ID: z.string().min(1),
-  X_CLIENT_SECRET: z.string().min(1),
+  // X_CLIENT_ID + X_CLIENT_SECRET only required for `strand oauth x` / X write
+  // path; otherwise resolved lazily from the credential store.
+  X_CLIENT_ID: z.string().optional(),
+  X_CLIENT_SECRET: z.string().optional(),
   X_BEARER_TOKEN: z.string().optional(),
   X_USER_ID: z.string().optional(),
   X_USER_ACCESS_TOKEN: z.string().optional(),

@@ -1,0 +1,50 @@
+# Strand CLI config. Copy to strand.config.yaml in the repo root (or
+# ~/.strand/config.yaml for a user-wide default) and edit to taste.
+#
+# Everything here is optional — defaults kick in when a field is missing.
+# Values here merge UNDER process.env — explicit env vars still win.
+
+mode: shadow              # shadow | gated | live
+
+llm:
+  provider: xai           # xai | openai | anthropic | gemini
+  model:
+    reasoner: grok-4.20-reasoning
+    composer: grok-4-1-fast-non-reasoning
+    judge: grok-4-1-fast-non-reasoning
+
+credentials:
+  store: env              # env | file | file+env | encrypted-file |
+                          # encrypted-file+env | keychain | keychain+env
+  tenant: null            # set to an id to namespace keys (multi-tenant)
+
+budget:
+  defaults:
+    tokens: 200000
+    usdTicks: 10000000    # 0.001 USD = 10^7 ticks; 10^7 ticks = 0.001 USD
+    wallClockMs: 600000   # 10 minutes
+    toolCalls: 100
+
+agent:
+  maxDepth: 3             # max spawn() recursion
+  maxSteps: 5             # max PlanSteps per runPlan
+  maxIterationsPerStep: 4 # agentic-loop iterations per step
+
+orchestrator:
+  perceiverMs: 120000     # 2 min
+  reasonerMs: 300000      # 5 min
+  consolidatorRunMs: 86400000   # 24 h
+  consolidatorPollMs: 1800000   # 30 min
+
+tools:
+  enableDestructive: false
+  workdir: .
+
+x:
+  tier: basic             # basic | pro | enterprise
+  oauthRedirect: http://localhost:4567/callback
+
+brainctl:
+  command: brainctl
+  args: mcp
+  remoteMcpUrl: null

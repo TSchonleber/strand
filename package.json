@@ -1,29 +1,33 @@
 {
   "name": "strand",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
-  "description": "Autonomous X presence agent. Provider-agnostic LLM (OpenAI-compatible, Anthropic, xAI, Gemini) with brainctl long-term memory.",
+  "description": "Strand — provider-agnostic agent harness. LLM (OpenAI-compatible, Anthropic, xAI, Gemini) · BYOK + OAuth · agentic tool loop · plan runner + multi-agent spawn · brainctl long-term memory · typestate policy gate.",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"
   },
   "packageManager": "pnpm@9.12.0",
+  "bin": {
+    "strand": "dist/cli/index.js"
+  },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "node --enable-source-maps dist/index.js",
+    "strand": "tsx src/cli/index.ts",
+    "dev": "tsx src/cli/index.ts dev",
+    "start": "node --enable-source-maps dist/cli/index.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "biome check .",
     "fmt": "biome format --write .",
-    "oauth:setup": "tsx scripts/oauth-setup.ts",
-    "keys": "tsx scripts/keys.ts",
+    "oauth:setup": "tsx src/cli/index.ts oauth x",
+    "keys": "tsx src/cli/index.ts keys",
     "memory:bootstrap": "tsx scripts/bootstrap-memory.ts",
     "shadow:replay": "tsx scripts/replay-shadow.ts",
-    "smoke:shadow": "tsx scripts/smoke-shadow.ts",
-    "status": "tsx src/cli/status.ts",
-    "review": "tsx src/cli/review.ts"
+    "smoke:shadow": "tsx src/cli/index.ts smoke",
+    "status": "tsx src/cli/index.ts status",
+    "review": "tsx src/cli/index.ts review"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
@@ -31,6 +35,7 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@xenova/transformers": "^2.17.2",
     "better-sqlite3": "^11.5.0",
+    "commander": "^14.0.3",
     "dotenv": "^16.4.5",
     "openai": "^4.73.0",
     "pino": "^9.5.0",
