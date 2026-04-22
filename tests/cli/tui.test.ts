@@ -16,7 +16,7 @@ import {
   type RunSummary,
   type TuiDataSource,
 } from "@/cli/tui/hooks";
-import { App } from "@/cli/tui/index";
+import { Dashboard } from "@/cli/tui/index";
 import { render } from "ink-testing-library";
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
@@ -94,13 +94,13 @@ function makeStubSource(): TuiDataSource {
   };
 }
 
-describe("strand tui", () => {
+describe("strand tui dashboard", () => {
   it("renders a non-empty frame with mocked data", () => {
     const source = makeStubSource();
     const tree = createElement(
       DataSourceContext.Provider,
       { value: source },
-      createElement(App, { pollMs: 10_000 }),
+      createElement(Dashboard, { pollMs: 10_000 }),
     );
     const { lastFrame, unmount } = render(tree);
 
@@ -144,7 +144,7 @@ describe("strand tui", () => {
     const tree = createElement(
       DataSourceContext.Provider,
       { value: empty },
-      createElement(App, { pollMs: 10_000 }),
+      createElement(Dashboard, { pollMs: 10_000 }),
     );
     const { lastFrame, unmount } = render(tree);
     const frame = lastFrame() ?? "";

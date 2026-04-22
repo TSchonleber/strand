@@ -5,10 +5,14 @@ import { launchTui } from "../tui/index";
 export function registerTuiCmd(program: Command, _ctx: CliContext): void {
   program
     .command("tui")
-    .description("launch live Strand TUI (agent tree + trace + budget)")
-    .option("--poll-ms <n>", "override default poll cadence", "2000")
-    .action(async (opts: { pollMs: string }) => {
+    .description("welcome splash with commands + tools; --dashboard for live view")
+    .option("-d, --dashboard", "start on the live dashboard instead of welcome")
+    .option("--poll-ms <n>", "dashboard poll cadence in ms", "2000")
+    .action(async (opts: { dashboard?: boolean; pollMs: string }) => {
       const n = Number(opts.pollMs);
-      await launchTui({ pollMs: Number.isFinite(n) && n > 0 ? n : 2000 });
+      await launchTui({
+        dashboard: opts.dashboard ?? false,
+        pollMs: Number.isFinite(n) && n > 0 ? n : 2000,
+      });
     });
 }
