@@ -1,12 +1,14 @@
 import { disconnect as brainDisconnect } from "@/clients/brain";
+import { env } from "@/config";
 import { closeDb, db } from "@/db";
 import { executeApproved } from "@/loops/actor";
 import { consolidatorPoll, consolidatorRun } from "@/loops/consolidator";
-import { perceiverTick } from "@/loops/perceiver";
+import { dmTick, perceiverTick } from "@/loops/perceiver";
 import { reasonerTick } from "@/loops/reasoner";
 import { evaluate, makeGate } from "@/policy";
 import { proposed } from "@/types/actions";
 import { log } from "@/util/log";
+import { sweepExpired } from "@/util/sweeper";
 
 interface LoopHandle {
   name: string;
@@ -19,6 +21,11 @@ let stopping = false;
 function every(ms: number, name: string, fn: () => Promise<void>): LoopHandle {
   const run = async () => {
     if (stopping) return;
+    // Kill switch: env flag halts loop in <5s
+    if (env.STRAND_HALT === "true") {
+      log.warn({ loop: name }, "orchestrator.halt_skipping_loop");
+      return;
+    }
     try {
       await fn();
     } catch (err) {
@@ -36,8 +43,12 @@ export function start(): void {
 
   handles.push(every(120_000, "perceiver", perceiverTick));
 
+  // DM poll every 5 min (separate from mention/timeline poll)
+  handles.push(every(300_000, "perceiver-dm", dmTick));
+
+  // Phase 2: Reasoner ticks every 10 min (shadow-mode). Emits ≤5 candidates.
   handles.push(
-    every(300_000, "reasoner", async () => {
+    every(600_000, "reasoner", async () => {
       const candidates = await reasonerTick();
       for (const c of candidates) {
         const verdict = evaluate(gate, proposed(c));
@@ -69,6 +80,13 @@ export function start(): void {
   // Consolidator: submit every 24 h, poll open batches every 30 min.
   handles.push(every(24 * 60 * 60 * 1000, "consolidator", consolidatorRun));
   handles.push(every(30 * 60 * 1000, "consolidator-poll", consolidatorPoll));
+
+  // Sweeper: clean up expired TTL rows every hour
+  handles.push(
+    every(60 * 60 * 1000, "sweeper", async () => {
+      sweepExpired(db());
+    }),
+  );
 
   log.info({ loops: handles.map((h) => h.name) }, "orchestrator.started");
 }

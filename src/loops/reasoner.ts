@@ -163,6 +163,8 @@ const MAX_TURNS = 5;
 const MAX_OUTPUT_TOKENS = 6000;
 /** Cap on agentic-loop iterations. Replaces the old single stuck-mid-thought retry. */
 const MAX_LOOP_ITERATIONS = 3;
+/** Phase 2 cap: Reasoner emits ≤5 candidates per tick. Hard-enforced post-parse. */
+const MAX_CANDIDATES_PER_TICK = 5;
 
 /**
  * A single Reasoner tick. Calls Grok with tools (x_search, web_search,
@@ -224,7 +226,7 @@ export async function reasonerTick(): Promise<CandidateEnvelope[]> {
       event: safeParse(e.payload_json),
     })),
     instruction:
-      "Propose up to 10 candidate actions. Use brainctl (memory_search, entity_get, tom_perspective_get, policy_match) before proposing any reply/DM/quote/project_proposal. Use x_search to scout beyond recent events only if it materially improves a decision. Output strictly matches the JSON schema.",
+      "Propose at most 5 candidate actions (fewer is fine — quality over quantity). Use brainctl (memory_search, entity_get, tom_perspective_get, policy_match) before proposing any reply/DM/quote/project_proposal. Use x_search to scout beyond recent events only if it materially improves a decision. Output strictly matches the JSON schema.",
   });
 
   const systemPrompts = [
@@ -290,6 +292,16 @@ export async function reasonerTick(): Promise<CandidateEnvelope[]> {
     const envelope: CandidateEnvelope = { ...check.data, modelResponseId: responseId };
     candidates.push(envelope);
     void proposed(envelope);
+  }
+
+  // Phase 2 hard cap: ≤5 candidates per tick. Drop overflow deterministically
+  // (keep the first N since the model already ranks them).
+  if (candidates.length > MAX_CANDIDATES_PER_TICK) {
+    log.warn(
+      { dropped: candidates.length - MAX_CANDIDATES_PER_TICK, cap: MAX_CANDIDATES_PER_TICK },
+      "reasoner.candidate_cap_enforced",
+    );
+    candidates.length = MAX_CANDIDATES_PER_TICK;
   }
 
   try {

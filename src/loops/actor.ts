@@ -1,13 +1,15 @@
 import { brain } from "@/clients/brain";
 import * as x from "@/clients/x";
+import { checkMonthlyCapHalt, incrementMonthlyUsage, isActorHalted } from "@/clients/x";
 import { env } from "@/config";
 import { db } from "@/db";
 import { recordActionCooldowns } from "@/policy/cooldowns";
 import { recordPostText } from "@/policy/duplicates";
 import type { Candidate } from "@/types/actions";
-import { idempotencyKey } from "@/util/idempotency";
+import { idempotencyKey, tweetDedupHash } from "@/util/idempotency";
 import { loopLog } from "@/util/log";
 import type { RateLimiter } from "@/util/ratelimit";
+import { isDuplicateTweet, recordTweetHash } from "@/util/sweeper";
 
 const log = loopLog("actor");
 
@@ -28,6 +30,14 @@ export async function executeApproved(
   c: Candidate<"approved">,
   decisionId: string,
 ): Promise<void> {
+  // Circuit breaker: monthly cap halt
+  if (isActorHalted() || checkMonthlyCapHalt()) {
+    log.warn({}, "actor.halted_monthly_cap");
+    throw new Error("Actor halted: monthly cap exceeded");
+  }
+
+  incrementMonthlyUsage();
+
   const key = idempotencyKey(c.action, c.sourceEventIds);
 
   const existing = db()
@@ -64,8 +74,29 @@ export async function executeApproved(
   }
 
   const t0 = Date.now();
+
+  // Tweet dedup check for post/reply/quote before calling X
+  if (c.action.kind === "post" || c.action.kind === "reply" || c.action.kind === "quote") {
+    const hash = tweetDedupHash(c.action);
+    if (isDuplicateTweet(db(), hash)) {
+      log.warn({ key, hash }, "actor.reject_duplicate_tweet");
+      db()
+        .prepare(
+          "UPDATE action_log SET status = 'rejected', error_code = 'DUPLICATE_TWEET' WHERE idempotency_key = ?",
+        )
+        .run(key);
+      return;
+    }
+  }
+
   try {
     const result = await x.execute(c.action);
+
+    // Record tweet hash for post/reply/quote to prevent future duplicates
+    if (c.action.kind === "post" || c.action.kind === "reply" || c.action.kind === "quote") {
+      const hash = tweetDedupHash(c.action);
+      recordTweetHash(db(), hash, c.action.text);
+    }
 
     db()
       .prepare(

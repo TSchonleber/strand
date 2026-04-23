@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS action_log (
   x_object_id TEXT,
   error_code TEXT,
   error_message TEXT,
+  operator_label TEXT,           -- Phase 2: good | bad | unclear — NULL if unlabeled
+  labeled_at TEXT,               -- Phase 2: when operator labeled this row
+  label_note TEXT,               -- Phase 2: optional free-text from operator
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   executed_at TEXT,
   duration_ms INTEGER
@@ -165,3 +168,14 @@ CREATE TABLE IF NOT EXISTS agent_skill_proposals (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_skill_proposals_status ON agent_skill_proposals(status);
 CREATE INDEX IF NOT EXISTS idx_agent_skill_proposals_created ON agent_skill_proposals(created_at);
+
+-- Tweet deduplication: SHA-256 of normalized text + targets + media IDs
+-- X has no idempotency-key support on POST /2/tweets; this guards against duplicates.
+CREATE TABLE IF NOT EXISTS tweet_dedup (
+  hash TEXT PRIMARY KEY,  -- SHA-256 hex
+  text_preview TEXT,      -- first 100 chars for debugging
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  expires_at TEXT NOT NULL  -- 72h TTL, swept hourly
+);
+
+CREATE INDEX IF NOT EXISTS idx_tweet_dedup_expires ON tweet_dedup(expires_at);

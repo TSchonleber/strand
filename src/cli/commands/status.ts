@@ -6,14 +6,62 @@ export function registerStatusCmd(program: Command, _ctx: CliContext): void {
   program
     .command("status")
     .description("orchestrator status + recent events / actions / reasoner / consolidator rows")
-    .action(async () => {
+    .option("--json", "emit status as JSON for programmatic checks")
+    .action(async (opts: { json?: boolean }) => {
       const { db } = await import("@/db");
       const dbh = db();
+
+      if (opts.json) {
+        // JSON output for 48h sanity checks
+        const eventCounts = dbh
+          .prepare("SELECT kind, COUNT(*) as count FROM perceived_events GROUP BY kind")
+          .all() as Array<{ kind: string; count: number }>;
+
+        const actionCounts = dbh
+          .prepare("SELECT status, COUNT(*) as count FROM action_log GROUP BY status")
+          .all() as Array<{ status: string; count: number }>;
+
+        const firstEvent = dbh
+          .prepare("SELECT created_at FROM perceived_events ORDER BY created_at ASC LIMIT 1")
+          .get() as { created_at: string } | undefined;
+        const lastEvent = dbh
+          .prepare("SELECT created_at FROM perceived_events ORDER BY created_at DESC LIMIT 1")
+          .get() as { created_at: string } | undefined;
+
+        const orphanEvents = dbh
+          .prepare("SELECT COUNT(*) as c FROM perceived_events WHERE forwarded_to_brain = 0")
+          .get() as { c: number };
+
+        const openReview = dbh
+          .prepare("SELECT COUNT(*) as c FROM human_review_queue WHERE decided_at IS NULL")
+          .get() as { c: number };
+
+        const output = {
+          env: {
+            strand_mode: process.env["STRAND_MODE"] ?? null,
+            llm_provider: process.env["LLM_PROVIDER"] ?? null,
+            tier: process.env["TIER"] ?? null,
+            strand_halt: process.env["STRAND_HALT"] ?? "false",
+          },
+          event_counts: Object.fromEntries(eventCounts.map((e) => [e.kind, e.count])),
+          action_counts: Object.fromEntries(actionCounts.map((a) => [a.status, a.count])),
+          event_time_range: {
+            first: firstEvent?.created_at ?? null,
+            last: lastEvent?.created_at ?? null,
+          },
+          orphan_events: orphanEvents.c,
+          human_review_open: openReview.c,
+          timestamp: new Date().toISOString(),
+        };
+        printLine(JSON.stringify(output, null, 2));
+        return;
+      }
 
       printLine("=== orchestrator ===");
       printLine(`STRAND_MODE         ${process.env["STRAND_MODE"] ?? "(unset)"}`);
       printLine(`LLM_PROVIDER        ${process.env["LLM_PROVIDER"] ?? "(unset)"}`);
       printLine(`credential store    ${process.env["STRAND_CREDENTIAL_STORE"] ?? "env"}`);
+      printLine(`STRAND_HALT         ${process.env["STRAND_HALT"] ?? "false"}`);
       printLine("");
 
       const events = dbh

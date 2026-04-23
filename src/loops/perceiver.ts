@@ -1,5 +1,6 @@
 import { brain } from "@/clients/brain";
 import * as x from "@/clients/x";
+import { env } from "@/config";
 import { db } from "@/db";
 import type { PerceivedEvent } from "@/types/events";
 import { loopLog } from "@/util/log";
@@ -17,13 +18,18 @@ const state: PerceiverState = {};
 export async function perceiverTick(): Promise<void> {
   const t0 = Date.now();
   try {
+    // Home timeline requires Pro+ tier; skip on Basic
+    const skipHomeTimeline = env.TIER === "basic";
+
     const [mentions, timeline] = await Promise.all([
       x.fetchMentions(
         state.lastMentionId ? { sinceId: state.lastMentionId, max: 50 } : { max: 50 },
       ),
-      x.fetchHomeTimeline(
-        state.lastTimelineId ? { sinceId: state.lastTimelineId, max: 50 } : { max: 50 },
-      ),
+      skipHomeTimeline
+        ? Promise.resolve([])
+        : x.fetchHomeTimeline(
+            state.lastTimelineId ? { sinceId: state.lastTimelineId, max: 50 } : { max: 50 },
+          ),
     ]);
 
     for (const m of mentions) {
@@ -68,7 +74,13 @@ export async function perceiverTick(): Promise<void> {
     if (timeline[0]?.id) state.lastTimelineId = timeline[0].id;
 
     log.info(
-      { mentions: mentions.length, timeline: timeline.length, durationMs: Date.now() - t0 },
+      {
+        mentions: mentions.length,
+        timeline: timeline.length,
+        durationMs: Date.now() - t0,
+        tier: env.TIER,
+        homeTimelineSkipped: skipHomeTimeline,
+      },
       "perceiver.tick",
     );
   } catch (err) {
@@ -86,5 +98,41 @@ async function persistEvent(ev: PerceivedEvent): Promise<void> {
     db().prepare("UPDATE perceived_events SET forwarded_to_brain = 1 WHERE id = ?").run(ev.id);
   } catch (err) {
     log.warn({ err, eventId: ev.id }, "perceiver.brain_forward_failed");
+  }
+}
+
+/**
+ * Poll DM events separately at 5-min cadence (faster than mention/timeline poll).
+ * Per PLAN.md Phase 1: DMs every 5 min, mentions every 10 min.
+ */
+export async function dmTick(): Promise<void> {
+  const t0 = Date.now();
+  try {
+    const dms = await x.fetchDmEvents(
+      state.lastDmId ? { sinceId: state.lastDmId, max: 50 } : { max: 50 },
+    );
+
+    for (const dm of dms) {
+      const ev: PerceivedEvent = {
+        kind: "dm_received",
+        id: `dm_${dm.id}`,
+        eventId: dm.id,
+        authorId: dm.sender_id,
+        text: dm.text,
+        createdAt: dm.created_at,
+      };
+      await persistEvent(ev);
+    }
+    if (dms[0]?.id) state.lastDmId = dms[0].id;
+
+    log.info(
+      {
+        dms: dms.length,
+        durationMs: Date.now() - t0,
+      },
+      "perceiver.dm_tick",
+    );
+  } catch (err) {
+    log.error({ err }, "perceiver.dm_tick.failed");
   }
 }

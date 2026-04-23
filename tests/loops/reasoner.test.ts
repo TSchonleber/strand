@@ -275,6 +275,40 @@ describe("reasonerTick", () => {
     expect(count).toBe(0);
   });
 
+  it("Phase 2: caps candidates at 5 even when model returns more", async () => {
+    // Build 8 distinct valid candidates
+    const extraCandidates = Array.from({ length: 8 }, (_, i) => ({
+      action: { kind: "like", tweetId: `tw_cap_${i}` },
+      rationale: `reason ${i}`,
+      confidence: 0.9,
+      relevanceScore: 0.8,
+      sourceEventIds: [`ev_${i}`],
+      requiresHumanReview: false,
+    }));
+
+    server.use(
+      http.post(XAI_RESPONSES, () =>
+        HttpResponse.json(mockResponse({ candidates: extraCandidates })),
+      ),
+    );
+
+    const out = await reasonerTick();
+    expect(out).toHaveLength(5); // hard cap
+    // First 5 kept deterministically (model's own ranking)
+    expect(out.map((c) => (c.action.kind === "like" ? c.action.tweetId : null))).toEqual([
+      "tw_cap_0",
+      "tw_cap_1",
+      "tw_cap_2",
+      "tw_cap_3",
+      "tw_cap_4",
+    ]);
+
+    const row = db()
+      .prepare("SELECT candidate_count FROM reasoner_runs ORDER BY id DESC LIMIT 1")
+      .get() as { candidate_count: number };
+    expect(row.candidate_count).toBe(5);
+  });
+
   it("integration: reply with relevanceScore ≥ 0.72 round-trips end-to-end", async () => {
     server.use(
       http.post(XAI_RESPONSES, () =>

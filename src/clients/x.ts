@@ -5,6 +5,25 @@ import type { Action } from "@/types/actions";
 import { log } from "@/util/log";
 import { TwitterApi, type TwitterApiTokens } from "twitter-api-v2";
 
+interface RateLimitState {
+  limit: number;
+  remaining: number;
+  resetAt: number; // unix seconds
+}
+
+// In-memory rate limit state per endpoint
+const rateLimitMap = new Map<string, RateLimitState>();
+
+// Monthly cap tracking
+const TIER_MONTHLY_CAP: Record<"basic" | "pro" | "enterprise", number> = {
+  basic: 10_000,
+  pro: 1_000_000,
+  enterprise: 50_000_000,
+};
+
+let monthlyUsage = 0;
+let actorHalted = false;
+
 /**
  * Narrow, typed X API v2 wrapper.
  *
@@ -109,10 +128,54 @@ export async function fetchHomeTimeline(opts: { sinceId?: string; max?: number }
 }
 
 export async function fetchDmEvents(opts: { sinceId?: string; max?: number } = {}) {
-  // v2 DM endpoints vary across tiers; wire exactly per your tier's reference.
-  // Stub returns [] until DMs are in scope per the phase plan.
-  log.debug({ opts }, "x.fetchDmEvents.stub");
-  return [] as Array<{ id: string; sender_id: string; text: string; created_at: string }>;
+  // GET /2/dm_events - requires dm.read scope
+  // Available on Basic tier with limited rate limits
+  try {
+    const client = await userClient();
+    // biome-ignore lint/suspicious/noExplicitAny: SDK boundary - v2 DM events
+    const c = client.v2 as any;
+
+    // Call listDmEvents if available; otherwise fall back to generic get
+    const params: Record<string, unknown> = {
+      max_results: opts.max ?? 50,
+      event_types: "MessageCreate",
+      "dm_event.fields": ["id", "text", "created_at", "sender_id", "event_type"],
+    };
+    if (opts.sinceId) params["pagination_token"] = opts.sinceId;
+
+    const res = c.listDmEvents ? await c.listDmEvents(params) : await c.get("dm_events", params);
+    const raw = (res?.data?.data ?? res?.data ?? []) as Array<{
+      id: string;
+      text?: string;
+      sender_id?: string;
+      created_at?: string;
+      event_type?: string;
+    }>;
+
+    // Track rate limits if headers present
+    if (res?.rateLimit) {
+      parseRateLimitHeaders(
+        {
+          "x-rate-limit-limit": String(res.rateLimit.limit ?? ""),
+          "x-rate-limit-remaining": String(res.rateLimit.remaining ?? ""),
+          "x-rate-limit-reset": String(res.rateLimit.reset ?? ""),
+        },
+        "dm_events",
+      );
+    }
+
+    return raw
+      .filter((e) => e.event_type === "MessageCreate" || !e.event_type)
+      .map((e) => ({
+        id: e.id,
+        sender_id: e.sender_id ?? "",
+        text: e.text ?? "",
+        created_at: e.created_at ?? new Date().toISOString(),
+      }));
+  } catch (err) {
+    log.warn({ err, opts }, "x.fetchDmEvents.failed");
+    return [] as Array<{ id: string; sender_id: string; text: string; created_at: string }>;
+  }
 }
 
 // ─── WRITE ───────────────────────────────────────────────────
@@ -199,4 +262,132 @@ export function whoAmI(): TwitterApiTokens | null {
   // env.* retained only for legacy callers; prefer store().get() in new code.
   void env;
   return null;
+}
+
+// ─── Rate Limit Tracking ─────────────────────────────────────
+
+/**
+ * Parse X rate limit headers from a response.
+ * Headers: x-rate-limit-limit, x-rate-limit-remaining, x-rate-limit-reset
+ */
+export function parseRateLimitHeaders(
+  headers: Record<string, string | string[] | undefined>,
+  endpoint: string,
+): RateLimitState | null {
+  const limit = Number.parseInt(String(headers["x-rate-limit-limit"]), 10);
+  const remaining = Number.parseInt(String(headers["x-rate-limit-remaining"]), 10);
+  const resetAt = Number.parseInt(String(headers["x-rate-limit-reset"]), 10);
+
+  if (Number.isNaN(limit) || Number.isNaN(remaining) || Number.isNaN(resetAt)) {
+    return null;
+  }
+
+  const state = { limit, remaining, resetAt };
+  rateLimitMap.set(endpoint, state);
+  return state;
+}
+
+/**
+ * Get current rate limit state for an endpoint.
+ */
+export function getRateLimit(endpoint: string): RateLimitState | null {
+  return rateLimitMap.get(endpoint) ?? null;
+}
+
+/**
+ * Increment monthly usage counter. Call this on every X API request.
+ */
+export function incrementMonthlyUsage(): void {
+  monthlyUsage++;
+}
+
+/**
+ * Get current monthly usage estimate.
+ */
+export function getMonthlyUsage(): number {
+  return monthlyUsage;
+}
+
+/**
+ * Check if we're approaching the monthly cap (90% threshold).
+ * Returns true if Actor should halt.
+ */
+export function checkMonthlyCapHalt(): boolean {
+  const tier = env.TIER;
+  const cap = TIER_MONTHLY_CAP[tier];
+  const threshold = Math.floor(cap * 0.9);
+
+  if (monthlyUsage >= threshold && !actorHalted) {
+    actorHalted = true;
+    log.error({ tier, monthlyUsage, cap, threshold }, "x.monthly_cap_halt_triggered");
+    return true;
+  }
+  return actorHalted;
+}
+
+/**
+ * Reset halt state (for testing or monthly reset).
+ */
+export function resetMonthlyHalt(): void {
+  actorHalted = false;
+  monthlyUsage = 0;
+}
+
+/**
+ * Check if Actor is currently halted due to rate limits.
+ */
+export function isActorHalted(): boolean {
+  return actorHalted;
+}
+
+/**
+ * Poll X API usage endpoint (GET /2/usage) to verify monthly cap.
+ * Updates monthlyUsage with actual server-side count.
+ * Returns null if usage endpoint unavailable or request fails.
+ */
+export async function pollUsage(): Promise<{ used: number; cap: number; resetAt: string } | null> {
+  try {
+    const c = await userClient();
+    // X API v2 usage endpoint - returns monthly usage stats
+    // Note: This endpoint may not be available on all tiers
+    const res = await c.v2.get("usage", {});
+    const data = res.data as {
+      data?: {
+        daily_project_usage?: Array<{ usage_count: string; date: string }>;
+        cap?: string;
+        project_id?: string;
+      };
+    };
+
+    if (data?.data?.daily_project_usage) {
+      // Sum up daily usage to get monthly total
+      const totalUsed = data.data.daily_project_usage.reduce(
+        (sum, day) => sum + (Number.parseInt(day.usage_count, 10) || 0),
+        0,
+      );
+      const cap = Number.parseInt(data.data.cap ?? "0", 10) || TIER_MONTHLY_CAP[env.TIER];
+
+      // Calculate reset date (first of next month)
+      const now = new Date();
+      const resetAt = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+
+      // Update local counter
+      const oldUsage = monthlyUsage;
+      monthlyUsage = totalUsed;
+
+      log.info(
+        { usage: totalUsed, cap, oldUsage, delta: totalUsed - oldUsage, resetAt },
+        "x.usage_polled",
+      );
+
+      // Check if we need to halt based on updated count
+      checkMonthlyCapHalt();
+
+      return { used: totalUsed, cap, resetAt };
+    }
+    return null;
+  } catch (err) {
+    log.warn({ err }, "x.usage_poll_failed");
+    return null;
+  }
 }

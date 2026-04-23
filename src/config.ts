@@ -51,6 +51,8 @@ const EnvSchema = z.object({
   SLACK_WEBHOOK_URL: z.string().url().optional(),
 
   TIER: z.enum(["basic", "pro", "enterprise"]).default("basic"),
+
+  STRAND_HALT: z.enum(["true", "false"]).default("false"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
