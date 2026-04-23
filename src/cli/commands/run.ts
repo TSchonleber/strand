@@ -16,6 +16,7 @@ interface RunOptions {
   budgetToolCalls?: string;
   json?: boolean;
   executor?: "noop" | "docker";
+  autoSkill?: "off" | "manual" | "auto";
 }
 
 function toInt(v: string | undefined): number | undefined {
@@ -59,6 +60,11 @@ export function registerRunCmd(program: Command, _ctx: CliContext): void {
     .option("--budget-tool-calls <n>", "max total tool invocations")
     .option("--json", "emit final PlanRunResult as JSON to stdout")
     .option("--executor <noop|docker>", "computer-use executor", "noop")
+    .option(
+      "--auto-skill <mode>",
+      "autonomous skill creation: off | manual (queue proposals) | auto (install safe skills)",
+      "manual",
+    )
     .action(async (goal: string, opts: RunOptions, cmd: Command) => {
       const resolved = getResolvedConfig(cmd);
       const cfg = resolved.config;
@@ -71,6 +77,7 @@ export function registerRunCmd(program: Command, _ctx: CliContext): void {
         NoopExecutor,
         SqliteTaskGraphStore,
         createBudget,
+        makeSqliteSkillProposalStore,
         runPlan,
         tools: toolsNs,
       } = agent;
@@ -117,6 +124,15 @@ export function registerRunCmd(program: Command, _ctx: CliContext): void {
       const maxIterations = toInt(opts.maxIterations) ?? cfg.agent.maxIterationsPerStep;
       const maxDepth = toInt(opts.maxDepth) ?? cfg.agent.maxDepth;
 
+      const autoSkillMode = opts.autoSkill ?? "manual";
+      if (!["off", "manual", "auto"].includes(autoSkillMode)) {
+        throw new Error(`--auto-skill must be off|manual|auto, got "${autoSkillMode}"`);
+      }
+      const autoSkillOpts =
+        autoSkillMode === "off"
+          ? undefined
+          : { mode: autoSkillMode, store: makeSqliteSkillProposalStore() };
+
       const result = await runPlan({
         ctx,
         goal,
@@ -124,6 +140,7 @@ export function registerRunCmd(program: Command, _ctx: CliContext): void {
         maxIterationsPerStep: maxIterations,
         maxDepth,
         ...(store ? { store } : {}),
+        ...(autoSkillOpts ? { autoCreateSkill: autoSkillOpts } : {}),
       });
 
       if (opts.json) {
@@ -140,6 +157,12 @@ export function registerRunCmd(program: Command, _ctx: CliContext): void {
           { header: "goal", value: (s) => s.goal, maxWidth: 70 },
           { header: "ms", value: (s) => elapsedMs(s), maxWidth: 8 },
         ]);
+        if (autoSkillMode !== "off" && result.status === "completed") {
+          printLine("");
+          printLine(
+            `skill proposal: autoskill=${autoSkillMode} — check \`strand skills pending list\``,
+          );
+        }
       }
 
       process.exit(result.status === "completed" ? 0 : 1);
