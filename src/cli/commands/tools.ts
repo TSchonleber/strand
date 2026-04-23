@@ -12,7 +12,13 @@ export function registerToolsCmd(program: Command, _ctx: CliContext): void {
     .action(async (opts: { enableDestructive?: boolean }) => {
       const { DefaultToolRegistry, tools } = await import("@/agent");
       const reg = new DefaultToolRegistry();
-      tools.registerDefaults(reg, { enableDestructive: opts.enableDestructive === true });
+      // Force `brainctl: "always"` so the catalog is stable regardless of whether
+      // the `brainctl` binary is on PATH on this machine. Actual plan runs use
+      // `"auto"` and silently skip brain_* when the binary is missing.
+      tools.registerDefaults(reg, {
+        enableDestructive: opts.enableDestructive === true,
+        brainctl: "always",
+      });
       const all = reg.list();
       printTable(all, [
         { header: "name", value: (t) => t.name, maxWidth: 24 },

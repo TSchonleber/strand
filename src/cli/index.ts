@@ -12,6 +12,8 @@ import { registerBudgetCmd } from "./commands/budget";
 import { registerCacheCmd } from "./commands/cache";
 import { registerConfigCmd } from "./commands/config";
 import { registerDevCmd } from "./commands/dev";
+import { registerDoctorCmd } from "./commands/doctor";
+import { registerInitCmd } from "./commands/init";
 import { registerKeysCmd } from "./commands/keys";
 import { registerOauthCmd } from "./commands/oauth";
 import { registerReviewCmd } from "./commands/review";
@@ -48,6 +50,8 @@ async function main(): Promise<number> {
     });
 
   const ctx: CliContext = {};
+  registerInitCmd(program, ctx);
+  registerDoctorCmd(program, ctx);
   registerRunCmd(program, ctx);
   registerTuiCmd(program, ctx);
   registerStatusCmd(program, ctx);

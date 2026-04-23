@@ -7,6 +7,8 @@ LLM: xAI · OpenAI-compatible (+ Ollama/Groq/Together/LM Studio) · Anthropic ·
 ## CLI at a glance
 
 ```bash
+strand init                      # first-run wizard — pick provider, store key, write .env
+strand doctor                    # preflight health check
 strand run "summarize the README and commit a rewrite"   # one-shot agentic plan
 strand tui                       # welcome splash · [d] live dashboard
 strand status                    # orchestrator + reasoner/consolidator summary
@@ -47,6 +49,19 @@ actor ◀── policy gate (typestate) ◀──────── reasoner (ca
 See `docs/ARCHITECTURE.md` for the full technical map (7 Mermaid diagrams, schema, cadence tables, circuit breakers). See `PLAN.md` for the phased build plan.
 
 ## Setup
+
+### Fastest path (30 seconds)
+
+```bash
+pnpm install
+pnpm strand init        # pick provider, paste key, .env written
+pnpm strand doctor      # verify everything resolves
+pnpm strand run "summarize README.md in 3 bullets"
+```
+
+`strand doctor` flags anything wrong (node version, native-module compile, missing creds, optional docker/brainctl). Only LLM creds and node ≥ 22 are required — everything else degrades gracefully.
+
+### Manual setup
 
 ```bash
 cp .env.example .env                       # base env

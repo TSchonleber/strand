@@ -2,6 +2,7 @@
  * Built-in tool barrel + registerDefaults helper.
  */
 
+import { isExecutable } from "@/util/which";
 import type { ComputerExecutor } from "../executor";
 import type { ToolRegistry } from "../types";
 import { makeBrainEntityGet, makeBrainMemorySearch } from "./brainctl";
@@ -27,6 +28,13 @@ export interface RegisterDefaultsOptions {
    * pass the full tool-plumbing config.
    */
   executor?: ComputerExecutor;
+  /**
+   * Register brainctl wrapper tools. Default: auto — register only when the
+   * `brainctl` binary is resolvable on PATH. Set `"always"` to force
+   * registration (useful if the binary appears later, or for tests), or
+   * `"never"` to suppress.
+   */
+  brainctl?: "auto" | "always" | "never";
 }
 
 export function registerDefaults(registry: ToolRegistry, opts: RegisterDefaultsOptions = {}): void {
@@ -49,9 +57,17 @@ export function registerDefaults(registry: ToolRegistry, opts: RegisterDefaultsO
   registry.register(makeGitLog(workdirOpt));
   registry.register(makeGitBranch(workdirOpt));
 
-  // brainctl wrappers
-  registry.register(makeBrainMemorySearch());
-  registry.register(makeBrainEntityGet());
+  // brainctl wrappers — skipped when the `brainctl` binary is not on PATH
+  // (registering them anyway is correct but produces noisy ENOENT errors the
+  // first time the LLM tries them on a fresh install).
+  const brainctlMode = opts.brainctl ?? "auto";
+  const brainctlCmd = process.env["BRAINCTL_COMMAND"] ?? "brainctl";
+  const brainctlOn =
+    brainctlMode === "always" || (brainctlMode === "auto" && isExecutable(brainctlCmd));
+  if (brainctlOn) {
+    registry.register(makeBrainMemorySearch());
+    registry.register(makeBrainEntityGet());
+  }
 
   if (opts.enableDestructive === true) {
     registry.register(makeFsWrite(workdirOpt));
