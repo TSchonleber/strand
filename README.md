@@ -182,6 +182,53 @@ docker run --rm -d --name strand-sandbox -p 127.0.0.1:5900:5900 strand-sandbox:l
 # then point a VNC client at vnc://127.0.0.1:5900
 ```
 
+## Procedural skills
+
+A **skill** is a markdown file with YAML front-matter (`.strand/skills/*.skill.md`) that Strand loads as a `Tool`. Calling the tool spawns a nested `runPlan` with the skill's body as the goal — cheap, recursive, byte-stable.
+
+```bash
+strand skills list              # both dirs, origin-annotated
+strand skills show <name>       # resolved path + raw contents
+strand skills add <name>        # interactive: write ./.strand/skills/<name>.skill.md
+strand skills remove <name>     # delete (default project, --user for ~/.strand)
+strand skills validate          # parse all, report YAML / schema errors
+```
+
+Project skills (`./.strand/skills/`) override user skills (`~/.strand/skills/`) on name collision. Every skill declares `sideEffects` (`none|local|external|destructive`), `requiresLive`, and `allowedTools`; the scoped registry for the nested run intersects with the skill's allowlist so a skill can never access tools its author didn't permit.
+
+### Autonomous skill creation
+
+`runPlan` can (optionally) ask the LLM whether a successful plan is worth promoting into a reusable skill. The hook is off by default. Turn it on per-call:
+
+```ts
+const result = await runPlan(ctx, "summarize any URL and write a report", {
+  autoCreateSkill: {
+    mode: "manual",                                   // "off" | "manual" | "auto"
+    store: makeSqliteSkillProposalStore(),            // SqliteSkillProposalStore by default
+    projectSkillsDir: "./.strand/skills",
+  },
+});
+```
+
+Invariants (safety is load-bearing here):
+
+- **Pre-LLM gates**: plan must have `status: "completed"`, ≥ 2 completed steps, ≥ 1 tool call (all tunable via `minSteps` / `minToolCalls`).
+- **Post-LLM gates**: proposed name matches `/^[a-z][a-z0-9_-]{2,39}$/` and never shadows a registered tool.
+- **sideEffects escalation**: Strand walks the plan's used tools, looks up each one's registered `sideEffects`, and takes the max (`destructive > external > local > none`). If the LLM claimed the skill is safer than what the plan actually touched, Strand escalates the proposal doc — a skill that called `http_fetch` can never ship as `"none"`.
+- **Auto-install gate**: `mode: "auto"` installs to disk only when resolved `sideEffects ∈ {none, local}` AND `!requiresLive`. Everything else — destructive, live, external — queues instead and waits for a human.
+
+Review the queue:
+
+```bash
+strand skills pending list                 # default filter: status=pending
+strand skills pending list -s installed    # or approved / rejected / installed
+strand skills pending show <id>            # full doc + LLM reasoning
+strand skills pending approve <id>         # write to ./.strand/skills (or --dir)
+strand skills pending reject <id>          # mark rejected, no disk write
+```
+
+Proposals live in `agent_skill_proposals` (strand.db). The LLM call uses a byte-stable cache key (`strand:skills:propose:v1`) — the proposal prompt is reused across every plan, so only the per-plan user message is uncached.
+
 ## Non-negotiable
 
 Read `CLAUDE.md`. The policy gate is not bypassable. DMs to non-mutuals: never. All DMs require human review during ramp-up.

@@ -335,6 +335,37 @@ strand: strand process {
     style.font-color: "#cffafe"
   }
 
+  skills: |md
+    ## Skills (procedural memory)
+    `src/agent/skills/`
+    `.strand/skills/*.skill.md` (project)
+    `~/.strand/skills/*.skill.md` (user)
+
+    YAML front-matter + markdown body, loaded
+    as synthesized Tools — calling one spawns a
+    nested `runPlan` with the body as the goal.
+    Scoped registry intersects with skill's
+    `allowedTools` (author-bound allowlist).
+
+    **Autonomous creation** (opt-in per runPlan)
+    after a completed plan, optional LLM call
+    proposes a reusable skill. Pre/post-LLM gates
+    + **sideEffects escalation**: walk the plan's
+    tools, take max side-effect, force-escalate if
+    LLM underclaimed. Auto-install only when
+    `none` / `local` AND `!requiresLive`; else queue
+    in `agent_skill_proposals` for human review.
+    cache key: `strand:skills:propose:v1`
+
+    CLI: `strand skills {list,show,add,remove,validate}`
+    `strand skills pending {list,show,approve,reject}`
+  | {
+    shape: rectangle
+    style.fill: "#1e1b4b"
+    style.stroke: "#818cf8"
+    style.font-color: "#e0e7ff"
+  }
+
   sqlite: |md
     ## SQLite ops store
     src/db/schema.sql
@@ -345,6 +376,8 @@ strand: strand process {
     `post_embeddings` (7d dup window)
     `perceived_events` · `dlq`
     `human_review_queue`
+    `agent_task_graphs` + `agent_plan_steps`
+    `agent_skill_proposals` (pending/approved/rejected/installed)
 
     _brain.db owns the semantic layer —_
     _strand.db is audit + ops only_
@@ -366,6 +399,10 @@ strand: strand process {
   plan_runner -> budget: "check · consume · fork" { style.stroke: "#f59e0b" }
   plan_runner -> tools: "scoped registry" { style.stroke: "#14b8a6" }
   plan_runner -> sqlite: "TaskGraph · steps · invocations" { style.stroke: "#14b8a6"; style.stroke-dash: 3 }
+  plan_runner -> skills: "autoCreateSkill hook (post-plan)" { style.stroke: "#818cf8"; style.stroke-dash: 3 }
+  skills -> tools: "skillToTool() — register as Tool" { style.stroke: "#818cf8"; style.stroke-width: 2 }
+  skills -> sqlite: "agent_skill_proposals" { style.stroke: "#818cf8"; style.stroke-dash: 3 }
+  skills -> plan_runner: "nested runPlan on invoke" { style.stroke: "#818cf8"; style.stroke-dash: 2 }
   perceiver -> sqlite: "INSERT perceived_events"
   sqlite -> reasoner: "SELECT last 50 events" { style.stroke-dash: 3 }
   reasoner -> gate: "CandidateEnvelope[]" { style.stroke: "#a78bfa"; style.stroke-width: 2 }
@@ -418,7 +455,12 @@ status: Phase status {
        resumeTaskGraph across restarts
     • computer-use: NoopExecutor + real DockerExecutor
     • consolidator: file batch · inline batch · sync
-    • 293 tests · typecheck+biome clean
+    • Skills v1 — markdown + YAML procedural memory,
+       loaded as synthesized Tools (nested runPlan)
+    • Autonomous skill creation — post-plan LLM
+       proposal with sideEffects escalation guard +
+       human-review queue (`strand skills pending`)
+    • 390 tests · typecheck+biome clean
   | {
     shape: rectangle
     style.fill: "#064e3b"
