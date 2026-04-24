@@ -147,6 +147,9 @@ class CliProcessHandle implements SubagentHandle {
     });
     this.process = proc;
 
+    // Swallow EPIPE on stdin — process may exit before we finish writing
+    proc.stdin?.on("error", () => {});
+
     // Send task as stdin for oneshot mode, then close
     if (this.task) {
       proc.stdin?.write(this.task);
