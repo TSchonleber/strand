@@ -14,7 +14,14 @@ import { env } from "@/config";
 import { Box, Text, useApp, useInput, useStdin } from "ink";
 import type { ReactElement } from "react";
 import { useCallback, useMemo, useState } from "react";
-import { Footer, Header, InvocationsPane, RunSummaryPane, TaskGraphsPane } from "./components";
+import {
+  Footer,
+  Header,
+  HelpPanel,
+  InvocationsPane,
+  RunSummaryPane,
+  TaskGraphsPane,
+} from "./components";
 import { useRecentInvocations, useRunSummary, useTaskGraphs } from "./hooks";
 
 export interface DashboardProps {
@@ -31,6 +38,7 @@ export function Dashboard({ pollMs = 2000, onWelcome }: DashboardProps): ReactEl
   const [scrollOffset, setScrollOffset] = useState(0);
   const [lastRefreshAt, setLastRefreshAt] = useState<number>(Date.now());
   const [paused, setPaused] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   const graphs = useTaskGraphs(paused ? 10 * 60_000 : pollMs);
   const summary = useRunSummary(paused ? 10 * 60_000 : Math.max(pollMs * 2, 5000));
@@ -47,6 +55,10 @@ export function Dashboard({ pollMs = 2000, onWelcome }: DashboardProps): ReactEl
     (input, key) => {
       if (input === "q" || (key.ctrl && input === "c")) {
         app.exit();
+        return;
+      }
+      if (input === "?") {
+        setShowHelp((h) => !h);
         return;
       }
       if (input === "w" && onWelcome) {
@@ -118,20 +130,26 @@ export function Dashboard({ pollMs = 2000, onWelcome }: DashboardProps): ReactEl
           <Text color="yellow">{"[paused] — press p to resume, r to refresh once"}</Text>
         </Box>
       ) : null}
-      <TaskGraphsPane
-        graphs={graphs.data}
-        loading={graphs.loading}
-        selectedIdx={Math.min(selectedIdx, Math.max(0, graphs.data.length - 1))}
-        expanded={expanded}
-        focused={focusedPane === "graphs"}
-      />
-      <RunSummaryPane summary={summary.data} loading={summary.loading} />
-      <InvocationsPane
-        rows={invocations.data}
-        loading={invocations.loading}
-        focused={focusedPane === "invocations"}
-        scrollOffset={scrollOffset}
-      />
+      {showHelp ? (
+        <HelpPanel />
+      ) : (
+        <>
+          <TaskGraphsPane
+            graphs={graphs.data}
+            loading={graphs.loading}
+            selectedIdx={Math.min(selectedIdx, Math.max(0, graphs.data.length - 1))}
+            expanded={expanded}
+            focused={focusedPane === "graphs"}
+          />
+          <RunSummaryPane summary={summary.data} loading={summary.loading} />
+          <InvocationsPane
+            rows={invocations.data}
+            loading={invocations.loading}
+            focused={focusedPane === "invocations"}
+            scrollOffset={scrollOffset}
+          />
+        </>
+      )}
       <Footer focusedPane={focusedPane} lastRefreshAt={lastRefreshAt} />
     </Box>
   );

@@ -10,6 +10,7 @@
  */
 
 import type { TaskGraph } from "@/agent/types";
+import { HELP_ENTRIES, HelpPanel } from "@/cli/tui/components";
 import {
   DataSourceContext,
   type InvocationRow,
@@ -120,9 +121,22 @@ describe("strand tui dashboard", () => {
     expect(frame).toContain("$0.18");
     // Consolidator counts
     expect(frame).toContain("7 runs");
-    // Footer hint
+    // Footer hint — condensed with help shortcut
     expect(frame).toContain("[q] quit");
+    expect(frame).toContain("[?] help");
 
+    unmount();
+  });
+
+  it("HelpPanel renders all keyboard shortcut entries", () => {
+    const { lastFrame, unmount } = render(createElement(HelpPanel));
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("keyboard shortcuts");
+    for (const entry of HELP_ENTRIES) {
+      expect(frame).toContain(entry.key);
+      expect(frame).toContain(entry.desc);
+    }
+    expect(frame).toContain("Press ? to close");
     unmount();
   });
 

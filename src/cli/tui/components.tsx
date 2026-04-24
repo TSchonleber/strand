@@ -275,6 +275,38 @@ export function InvocationsPane(props: InvocationsPaneProps): ReactElement {
   );
 }
 
+// ─── HelpPanel ──────────────────────────────────────────────────────────────
+
+const HELP_ENTRIES: ReadonlyArray<{ key: string; desc: string }> = [
+  { key: "?", desc: "toggle this help" },
+  { key: "q", desc: "quit" },
+  { key: "r", desc: "refresh" },
+  { key: "p", desc: "pause / resume" },
+  { key: "tab", desc: "switch focus" },
+  { key: "up/down", desc: "select / scroll" },
+  { key: "enter", desc: "expand / collapse" },
+  { key: "w", desc: "welcome" },
+];
+
+export { HELP_ENTRIES };
+
+export function HelpPanel(): ReactElement {
+  return (
+    <Box flexDirection="column" paddingX={1} paddingY={1}>
+      <Text bold color="cyan">
+        {"─── keyboard shortcuts ───"}
+      </Text>
+      {HELP_ENTRIES.map((e) => (
+        <Box key={e.key}>
+          <Text color="yellow">{`  ${e.key.padEnd(10)}`}</Text>
+          <Text color="white">{e.desc}</Text>
+        </Box>
+      ))}
+      <Text color="gray">{"\nPress ? to close."}</Text>
+    </Box>
+  );
+}
+
 // ─── Footer ─────────────────────────────────────────────────────────────────
 
 export interface FooterProps {
@@ -285,11 +317,7 @@ export interface FooterProps {
 export function Footer(props: FooterProps): ReactElement {
   return (
     <Box paddingX={1} flexDirection="column">
-      <Text color="gray">
-        {"[↑↓] select · [enter] expand · [tab] switch pane ("}
-        {props.focusedPane}
-        {") · [r] refresh · [p] pause · [q] quit"}
-      </Text>
+      <Text color="gray">{"[q] quit · [r] refresh · [p] pause · [?] help"}</Text>
       <Text color="gray">last refresh: {fmtTime(new Date(props.lastRefreshAt).toISOString())}</Text>
     </Box>
   );
