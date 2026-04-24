@@ -95,7 +95,7 @@ function makeStubSource(): TuiDataSource {
 }
 
 describe("strand tui dashboard", () => {
-  it("renders a non-empty frame with mocked data", () => {
+  it("renders cockpit panels with mocked data", () => {
     const source = makeStubSource();
     const tree = createElement(
       DataSourceContext.Provider,
@@ -106,20 +106,37 @@ describe("strand tui dashboard", () => {
 
     const frame = lastFrame() ?? "";
     expect(frame.length).toBeGreaterThan(0);
-    // Header renders provider + mode
-    expect(frame).toContain("Strand TUI");
+
+    // Cockpit banner
+    expect(frame).toContain("Strand");
+    expect(frame).toContain("operator cockpit");
+
+    // Mission panel
+    expect(frame).toContain("MISSION");
     expect(frame).toContain("shadow");
-    // A fake graph appears
-    expect(frame).toContain("crawl site X and summarize");
-    expect(frame).toContain("fetch home page");
-    // Invocations pane shows a tool line
-    expect(frame).toContain("http_fetch");
-    expect(frame).toContain("fs_read");
-    // Run summary pane shows reasoner ticks + cost
+    expect(frame).toContain("HALT");
+
+    // Safety Shield panel
+    expect(frame).toContain("SAFETY SHIELD");
+    expect(frame).toContain("queued");
+    expect(frame).toContain("7 runs");
+
+    // Pulse panel
+    expect(frame).toContain("PULSE");
     expect(frame).toContain("42 ticks");
     expect(frame).toContain("$0.18");
-    // Consolidator counts
-    expect(frame).toContain("7 runs");
+
+    // Reach panel
+    expect(frame).toContain("REACH");
+
+    // Task graph still renders
+    expect(frame).toContain("crawl site X and summarize");
+    expect(frame).toContain("fetch home page");
+
+    // Invocations pane shows tool lines
+    expect(frame).toContain("http_fetch");
+    expect(frame).toContain("fs_read");
+
     // Footer hint
     expect(frame).toContain("[q] quit");
 
@@ -148,9 +165,44 @@ describe("strand tui dashboard", () => {
     );
     const { lastFrame, unmount } = render(tree);
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("Strand TUI");
+    // Cockpit panels still render
+    expect(frame).toContain("MISSION");
+    expect(frame).toContain("SAFETY SHIELD");
+    expect(frame).toContain("PULSE");
+    expect(frame).toContain("REACH");
+    // Empty state for data panes
     expect(frame).toContain("(no active graphs)");
     expect(frame).toContain("(no invocations yet)");
+    unmount();
+  });
+
+  it("renders ASCII bars in pulse panel", () => {
+    const source = makeStubSource();
+    const tree = createElement(
+      DataSourceContext.Provider,
+      { value: source },
+      createElement(Dashboard, { pollMs: 10_000 }),
+    );
+    const { lastFrame, unmount } = render(tree);
+    const frame = lastFrame() ?? "";
+    // ASCII bars use # and ─ characters
+    expect(frame).toMatch(/\[#+─*\]/);
+    unmount();
+  });
+
+  it("shows safety indicators with correct severity", () => {
+    const source = makeStubSource();
+    const tree = createElement(
+      DataSourceContext.Provider,
+      { value: source },
+      createElement(Dashboard, { pollMs: 10_000 }),
+    );
+    const { lastFrame, unmount } = render(tree);
+    const frame = lastFrame() ?? "";
+    // DLQ count appears
+    expect(frame).toContain("1 failed");
+    // Queued count appears
+    expect(frame).toContain("4 queued");
     unmount();
   });
 });

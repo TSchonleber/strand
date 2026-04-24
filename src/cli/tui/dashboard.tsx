@@ -1,5 +1,5 @@
 /**
- * Strand dashboard — the live view behind `strand tui --dashboard`.
+ * Strand cockpit — the operator command center behind `strand tui --dashboard`.
  *
  * Single-screen read-only tree over the local SQLite ops DB:
  *   - polls `agent_task_graphs` / `_steps` for active graphs
@@ -13,8 +13,17 @@
 import { env } from "@/config";
 import { Box, Text, useApp, useInput, useStdin } from "ink";
 import type { ReactElement } from "react";
-import { useCallback, useMemo, useState } from "react";
-import { Footer, Header, InvocationsPane, RunSummaryPane, TaskGraphsPane } from "./components";
+import { useCallback, useState } from "react";
+import {
+  CockpitBanner,
+  Footer,
+  InvocationsPane,
+  MissionPanel,
+  PulsePanel,
+  ReachPanel,
+  SafetyShieldPanel,
+  TaskGraphsPane,
+} from "./components";
 import { useRecentInvocations, useRunSummary, useTaskGraphs } from "./hooks";
 
 export interface DashboardProps {
@@ -92,20 +101,12 @@ export function Dashboard({ pollMs = 2000, onWelcome }: DashboardProps): ReactEl
     { isActive: Boolean(isRawModeSupported) },
   );
 
-  const header = useMemo(
-    () => ({
-      provider: env.LLM_PROVIDER,
-      model: env.LLM_MODEL_REASONER,
-      mode: env.STRAND_MODE,
-      credentialStore: process.env["STRAND_CREDENTIAL_STORE"] ?? "env",
-      tenant: process.env["STRAND_TENANT"] ?? null,
-    }),
-    [],
-  );
+  const r = summary.data.reasoner;
+  const c = summary.data.consolidator;
 
   return (
     <Box flexDirection="column">
-      <Header {...header} />
+      <CockpitBanner />
       {!isRawModeSupported ? (
         <Box paddingX={1}>
           <Text color="yellow">
@@ -118,6 +119,34 @@ export function Dashboard({ pollMs = 2000, onWelcome }: DashboardProps): ReactEl
           <Text color="yellow">{"[paused] — press p to resume, r to refresh once"}</Text>
         </Box>
       ) : null}
+      {/* ── Cockpit top row ── */}
+      <Box flexDirection="row">
+        <MissionPanel
+          mode={env.STRAND_MODE}
+          halt={env.STRAND_HALT}
+          tier={env.TIER}
+          provider={env.LLM_PROVIDER}
+          model={env.LLM_MODEL_REASONER}
+        />
+        <SafetyShieldPanel
+          reviewQueued={c.queued}
+          reviewActive={c.inProgress}
+          dlqFailed={c.failed}
+          totalRuns={c.total}
+          completedRuns={c.completed}
+        />
+      </Box>
+      {/* ── Cockpit bottom row ── */}
+      <Box flexDirection="row">
+        <PulsePanel
+          ticks={r.ticks}
+          candidates={r.candidates}
+          toolCalls={r.toolCalls}
+          costUsdTicks={r.costUsdTicks}
+        />
+        <ReachPanel />
+      </Box>
+      {/* ── Live data panes ── */}
       <TaskGraphsPane
         graphs={graphs.data}
         loading={graphs.loading}
@@ -125,7 +154,6 @@ export function Dashboard({ pollMs = 2000, onWelcome }: DashboardProps): ReactEl
         expanded={expanded}
         focused={focusedPane === "graphs"}
       />
-      <RunSummaryPane summary={summary.data} loading={summary.loading} />
       <InvocationsPane
         rows={invocations.data}
         loading={invocations.loading}
