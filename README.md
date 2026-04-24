@@ -11,6 +11,7 @@ strand init                      # first-run wizard — pick provider, store key
 strand doctor                    # preflight health check
 strand run "summarize the README and commit a rewrite"   # one-shot agentic plan
 strand tui                       # welcome splash · [d] live dashboard
+strand tui -d                    # cockpit — live operator dashboard
 strand status                    # orchestrator + reasoner/consolidator summary
 strand tasks list                # persisted TaskGraphs
 strand tasks show <id>           # graph + steps + reflections
@@ -36,6 +37,39 @@ Most agent bills come from busted prefix caches — children and retries that ch
 - Anthropic adapter places `cache_control: {type:"ephemeral"}` breakpoints at the end of the shared system AND at the last message — the two-breakpoint pattern that covers shared-prefix reuse AND intra-loop continuation.
 - Every adapter's `chat.call` log now includes `cache_ratio` + `prompt_cache_key` so you can watch for drift in real time.
 - `strand cache` aggregates `reasoner_runs.usage_json` over a window, shows the hit rate, and flags drift when it drops below 30 % over 5 + ticks.
+
+### Cockpit (`strand tui -d`)
+
+The dashboard (cockpit) is the recommended daily terminal for operators. It is a read-only live view over the local SQLite ops DB — it never writes.
+
+```bash
+# Launch the cockpit directly
+strand tui -d
+
+# Custom poll cadence (default 2000ms)
+strand tui -d --poll-ms 5000
+```
+
+**Pinned terminal setup:** pin a dedicated terminal tab/pane to the cockpit so it runs alongside your editor. In tmux:
+
+```bash
+# Split pane and launch cockpit
+tmux split-window -h 'strand tui -d'
+```
+
+**Keyboard shortcuts:**
+
+| Key       | Action                          |
+| --------- | ------------------------------- |
+| `↑` / `↓` | Select graph or scroll invocations |
+| `Enter`   | Expand / collapse selected graph |
+| `Tab`     | Switch focus: graphs ↔ invocations |
+| `r`       | Manual refresh all panes        |
+| `p`       | Pause / resume auto-polling     |
+| `w`       | Back to welcome splash          |
+| `q`       | Quit                            |
+
+The cockpit shows: active task graphs with step-level progress, reasoner + consolidator 24h stats (ticks, cost, completion), a scrollable tool-invocation stream, and X API health per action kind.
 
 ## Architecture
 

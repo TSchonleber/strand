@@ -154,4 +154,19 @@ describe("strand CLI", () => {
     expect(code).toBe(0);
     expect(stdout).toContain("no pending reviews");
   });
+
+  it("`tui --help` shows --dashboard and --poll-ms options", () => {
+    const { code, stdout } = runCli(["tui", "--help"]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("--dashboard");
+    expect(stdout).toContain("--poll-ms");
+  });
+
+  it("`budget` on an empty DB exits 0", () => {
+    const { code } = runCli(["budget"], {
+      env: { DATABASE_PATH: tmpDb },
+      cwd: process.cwd(),
+    });
+    expect(code).toBe(0);
+  });
 });

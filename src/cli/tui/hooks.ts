@@ -45,12 +45,29 @@ export interface RunSummary {
   };
 }
 
+export interface XHealthEntry {
+  kind: string;
+  lastStatus: string;
+  lastErrorCode: string | null;
+  lastAt: string;
+  ok24h: number;
+  fail24h: number;
+}
+
+export interface OperatorSnapshot {
+  graphs: TaskGraph[];
+  invocations: InvocationRow[];
+  summary: RunSummary;
+  xHealth: XHealthEntry[];
+}
+
 // ─── DataSource interface ───────────────────────────────────────────────────
 
 export interface TuiDataSource {
   listActiveTaskGraphs(): TaskGraph[];
   recentInvocations(limit: number): InvocationRow[];
   runSummary24h(): RunSummary;
+  xHealth(): XHealthEntry[];
 }
 
 // ─── SQLite-backed data source ──────────────────────────────────────────────
@@ -105,6 +122,21 @@ interface ConsolidatorRow {
   n: number;
 }
 
+interface XHealthRow {
+  kind: string;
+  last_status: string;
+  last_error_code: string | null;
+  last_at: string;
+  ok_24h: number | null;
+  fail_24h: number | null;
+}
+
+function safeIso(v: string | null): string | undefined {
+  if (v == null) return undefined;
+  const t = new Date(v).getTime();
+  return Number.isFinite(t) ? v : undefined;
+}
+
 function stepFromRow(r: StepRow): PlanStep {
   const step: PlanStep = {
     id: r.id,
@@ -115,8 +147,10 @@ function stepFromRow(r: StepRow): PlanStep {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
-  if (r.started_at != null) step.startedAt = r.started_at;
-  if (r.completed_at != null) step.completedAt = r.completed_at;
+  const sa = safeIso(r.started_at);
+  if (sa) step.startedAt = sa;
+  const ca = safeIso(r.completed_at);
+  if (ca) step.completedAt = ca;
   if (r.error != null) step.error = r.error;
   return step;
 }
@@ -144,6 +178,26 @@ export function makeSqliteDataSource(database?: Database.Database): TuiDataSourc
      FROM consolidator_runs
      WHERE created_at >= datetime('now','-24 hours')
      GROUP BY status`,
+  );
+  const qXHealth = dbi.prepare(
+    `SELECT
+       kind,
+       status AS last_status,
+       error_code AS last_error_code,
+       created_at AS last_at,
+       (SELECT COUNT(*) FROM action_log a2
+        WHERE a2.kind = a1.kind AND a2.status = 'executed'
+          AND a2.created_at >= datetime('now','-24 hours')) AS ok_24h,
+       (SELECT COUNT(*) FROM action_log a2
+        WHERE a2.kind = a1.kind AND a2.status = 'failed'
+          AND a2.created_at >= datetime('now','-24 hours')) AS fail_24h
+     FROM action_log a1
+     WHERE a1.rowid IN (
+       SELECT MAX(rowid) FROM action_log
+       WHERE executed_at IS NOT NULL OR status = 'failed'
+       GROUP BY kind
+     )
+     ORDER BY a1.created_at DESC`,
   );
 
   return {
@@ -203,6 +257,17 @@ export function makeSqliteDataSource(database?: Database.Database): TuiDataSourc
           inProgress: byStatus.get("in_progress") ?? 0,
         },
       };
+    },
+    xHealth(): XHealthEntry[] {
+      const rows = qXHealth.all() as XHealthRow[];
+      return rows.map((r) => ({
+        kind: r.kind,
+        lastStatus: r.last_status,
+        lastErrorCode: r.last_error_code,
+        lastAt: r.last_at,
+        ok24h: r.ok_24h ?? 0,
+        fail24h: r.fail_24h ?? 0,
+      }));
     },
   };
 }
@@ -279,4 +344,38 @@ export function useRunSummary(pollMs = 5000): PollState<RunSummary> {
 export function useRecentInvocations(limit = 50, pollMs = 1000): PollState<InvocationRow[]> {
   const src = useDataSource();
   return usePolled<InvocationRow[]>(() => src.recentInvocations(limit), [], pollMs);
+}
+
+export function useXHealth(pollMs = 10_000): PollState<XHealthEntry[]> {
+  const src = useDataSource();
+  return usePolled<XHealthEntry[]>(() => src.xHealth(), [], pollMs);
+}
+
+export function useOperatorSnapshot(pollMs = 2000): PollState<OperatorSnapshot> {
+  const src = useDataSource();
+  const initial: OperatorSnapshot = {
+    graphs: [],
+    invocations: [],
+    summary: {
+      reasoner: {
+        ticks: 0,
+        candidates: 0,
+        toolCalls: 0,
+        costUsdTicks: 0,
+        avgDurationMsEstimate: 0,
+      },
+      consolidator: { total: 0, completed: 0, failed: 0, queued: 0, inProgress: 0 },
+    },
+    xHealth: [],
+  };
+  return usePolled<OperatorSnapshot>(
+    () => ({
+      graphs: src.listActiveTaskGraphs(),
+      invocations: src.recentInvocations(50),
+      summary: src.runSummary24h(),
+      xHealth: src.xHealth(),
+    }),
+    initial,
+    pollMs,
+  );
 }
