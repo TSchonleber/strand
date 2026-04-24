@@ -2,6 +2,67 @@
 
 Operational procedures for running Strand in Phase 1 read-only mode.
 
+## Cockpit — Daily Operator Terminal
+
+The cockpit (`strand tui -d`) is a read-only live dashboard over the local
+SQLite ops DB. It polls task graphs, tool invocations, reasoner/consolidator
+stats, and X API health. It never writes to the database.
+
+### Launching
+
+```bash
+# Cockpit with default 2s poll
+strand tui -d
+
+# Slower poll for low-resource hosts
+strand tui -d --poll-ms 5000
+```
+
+### Recommended pinned terminal
+
+Keep the cockpit visible at all times during operation. Suggested setups:
+
+```bash
+# tmux — dedicated right pane
+tmux split-window -h 'strand tui -d'
+
+# iTerm2 / Terminal.app — pin a tab titled "cockpit"
+# Alacritty / kitty — use your tiling WM to pin
+```
+
+### Keyboard shortcuts
+
+| Key       | Action                              |
+| --------- | ----------------------------------- |
+| `↑` / `↓` | Select graph / scroll invocations  |
+| `Enter`   | Expand / collapse selected graph    |
+| `Tab`     | Switch focus: graphs ↔ invocations  |
+| `r`       | Manual refresh all panes            |
+| `p`       | Pause / resume auto-polling         |
+| `w`       | Back to welcome splash              |
+| `q`       | Quit                                |
+
+### What to watch
+
+- **Active task graphs**: step-level status, duration, errors.
+- **Reasoner 24h stats**: tick count, candidate count, cost. Cost should stay
+  well below daily budget (`strand budget`).
+- **Consolidator**: completed vs failed vs queued. Sustained failures need
+  investigation.
+- **Tool invocations**: real-time stream of agent tool calls with durations.
+  Errors highlighted in red.
+- **X API health** (per action kind): latest status + 24h ok/fail counts.
+  A `429` error on any endpoint means the Actor circuit breaker should engage.
+
+### Troubleshooting
+
+If the cockpit shows all zeros after the orchestrator has been running:
+1. Verify the orchestrator is running: `pnpm strand status`
+2. Check `DATABASE_PATH` points to the same DB the orchestrator uses.
+3. Restart the cockpit: `q` then re-launch.
+
+---
+
 ## Phase 1: 48h Sanity Check Run
 
 ### Prerequisites
@@ -28,7 +89,8 @@ echo "Started: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > ./data/phase1-run.log
 
 ### Monitoring During Run
 
-Every 4 hours, run:
+Keep `strand tui -d` (the cockpit) running in a pinned terminal pane for
+continuous visibility. Additionally, every 4 hours, run:
 
 ```bash
 # Quick status check
