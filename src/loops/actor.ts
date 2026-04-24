@@ -73,7 +73,14 @@ export async function executeApproved(
   const isShadow = env.STRAND_MODE === "shadow" || (!isLowRisk && env.STRAND_MODE === "live");
 
   if (isShadow) {
-    log.info({ key, kind: c.action.kind, reason: env.STRAND_MODE === "shadow" ? "mode_shadow" : "phase3_non_lowrisk" }, "actor.shadow");
+    log.info(
+      {
+        key,
+        kind: c.action.kind,
+        reason: env.STRAND_MODE === "shadow" ? "mode_shadow" : "phase3_non_lowrisk",
+      },
+      "actor.shadow",
+    );
     db().prepare("UPDATE action_log SET status = 'executed' WHERE idempotency_key = ?").run(key);
     return;
   }

@@ -426,7 +426,7 @@ Agents work fast. These are gate conditions, not days. Codex holds the green fla
 
 Every stream owner acknowledges they've read this spec by appending their name + date below before writing code.
 
-- [ ] Codex (team lead)
+- [x] Codex (team lead) — 2026-04-24
 - [ ] Claude Code
 - [ ] Devin-1
 - [ ] Devin-2

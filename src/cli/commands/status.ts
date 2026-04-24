@@ -140,11 +140,11 @@ export function registerStatusCmd(program: Command, _ctx: CliContext): void {
           "SELECT tick_at, candidate_count, tool_call_count, cost_in_usd_ticks FROM reasoner_runs ORDER BY tick_at DESC LIMIT 5",
         )
         .all() as Array<{
-          tick_at: string;
-          candidate_count: number;
-          tool_call_count: number;
-          cost_in_usd_ticks: number | null;
-        }>;
+        tick_at: string;
+        candidate_count: number;
+        tool_call_count: number;
+        cost_in_usd_ticks: number | null;
+      }>;
       printLine(`=== last ${reasoner.length} reasoner_runs ===`);
       for (const r of reasoner) {
         printLine(
@@ -158,11 +158,11 @@ export function registerStatusCmd(program: Command, _ctx: CliContext): void {
           "SELECT status, batch_id, completed_at, created_at FROM consolidator_runs ORDER BY created_at DESC LIMIT 5",
         )
         .all() as Array<{
-          status: string;
-          batch_id: string | null;
-          completed_at: string | null;
-          created_at: string;
-        }>;
+        status: string;
+        batch_id: string | null;
+        completed_at: string | null;
+        created_at: string;
+      }>;
       printLine(`=== last ${consolidator.length} consolidator_runs ===`);
       for (const c of consolidator) {
         printLine(

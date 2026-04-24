@@ -8,11 +8,11 @@
  * - Error rates by action kind
  */
 
+import { getMonthlyUsage, getRateLimit } from "@/clients/x";
 import { env } from "@/config";
 import { db } from "@/db";
-import { getRateLimit, getMonthlyUsage } from "@/clients/x";
-import { log } from "@/util/log";
 import type { Action } from "@/types/actions";
+import { log } from "@/util/log";
 
 const TIER_MONTHLY_CAP: Record<"basic" | "pro" | "enterprise", number> = {
   basic: 10_000,
@@ -150,12 +150,9 @@ export function recordFollowerDelta(followers: {
  * Record action error rate.
  * Called by Actor when an action fails.
  */
-export function recordActionError(
-  kind: Action["kind"],
-  errorCode: string,
-): void {
+export function recordActionError(kind: Action["kind"], errorCode: string): void {
   try {
-    const hourBucket = new Date().toISOString().slice(0, 13) + ":00:00Z"; // Round to hour
+    const hourBucket = `${new Date().toISOString().slice(0, 13)}:00:00Z`; // Round to hour
 
     const d = db();
 
