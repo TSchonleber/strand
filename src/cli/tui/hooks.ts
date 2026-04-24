@@ -45,12 +45,49 @@ export interface RunSummary {
   };
 }
 
+export interface OperatorSnapshot {
+  review: {
+    open: number;
+    oldestMinutes: number | null;
+  };
+  actions24h: {
+    total: number;
+    approved: number;
+    rejected: number;
+    executed: number;
+    failed: number;
+    byKind: Array<{ kind: string; count: number }>;
+  };
+  guardrails: {
+    activeCooldowns: number;
+    dlqOpen: number;
+    recentDuplicateHashes: number;
+  };
+  x: {
+    latestHealth: Array<{
+      endpoint: string;
+      healthy: number;
+      remaining: number | null;
+      limit: number | null;
+      sampledAt: string;
+    }>;
+    monthlyUsed: number | null;
+    monthlyCap: number | null;
+  };
+  followers: {
+    count: number;
+    delta24h: number | null;
+    sampledAt: string;
+  } | null;
+}
+
 // ─── DataSource interface ───────────────────────────────────────────────────
 
 export interface TuiDataSource {
   listActiveTaskGraphs(): TaskGraph[];
   recentInvocations(limit: number): InvocationRow[];
   runSummary24h(): RunSummary;
+  operatorSnapshot(): OperatorSnapshot;
 }
 
 // ─── SQLite-backed data source ──────────────────────────────────────────────
@@ -105,6 +142,40 @@ interface ConsolidatorRow {
   n: number;
 }
 
+interface CountRow {
+  n: number;
+}
+
+interface OldestRow {
+  created_at: string | null;
+}
+
+interface StatusCountRow {
+  status: string;
+  n: number;
+}
+
+interface KindCountRow {
+  kind: string;
+  n: number;
+}
+
+interface HealthRow {
+  endpoint: string;
+  healthy: number;
+  rate_limit_remaining: number | null;
+  rate_limit_limit: number | null;
+  sampled_at: string;
+  monthly_used: number | null;
+  monthly_cap: number | null;
+}
+
+interface FollowerRow {
+  followers_count: number;
+  delta_24h: number | null;
+  sampled_at: string;
+}
+
 function stepFromRow(r: StepRow): PlanStep {
   const step: PlanStep = {
     id: r.id,
@@ -121,8 +192,16 @@ function stepFromRow(r: StepRow): PlanStep {
   return step;
 }
 
+function ageMinutes(iso: string | null): number | null {
+  if (iso == null) return null;
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return Math.max(0, Math.floor((Date.now() - ms) / 60_000));
+}
+
 export function makeSqliteDataSource(database?: Database.Database): TuiDataSource {
   const dbi = database ?? defaultDb();
+  const since24h = "strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')";
   const qGraphs = dbi.prepare(
     "SELECT * FROM agent_task_graphs WHERE status IN ('pending','running') ORDER BY updated_at DESC LIMIT 20",
   );
@@ -144,6 +223,43 @@ export function makeSqliteDataSource(database?: Database.Database): TuiDataSourc
      FROM consolidator_runs
      WHERE created_at >= datetime('now','-24 hours')
      GROUP BY status`,
+  );
+  const qReviewOpen = dbi.prepare(
+    "SELECT COUNT(*) AS n FROM human_review_queue WHERE decided_at IS NULL",
+  );
+  const qReviewOldest = dbi.prepare(
+    "SELECT MIN(created_at) AS created_at FROM human_review_queue WHERE decided_at IS NULL",
+  );
+  const qActionStatus24h = dbi.prepare(
+    `SELECT status, COUNT(*) AS n
+     FROM action_log
+     WHERE created_at >= ${since24h}
+     GROUP BY status`,
+  );
+  const qActionKind24h = dbi.prepare(
+    `SELECT kind, COUNT(*) AS n
+     FROM action_log
+     WHERE created_at >= ${since24h}
+     GROUP BY kind
+     ORDER BY n DESC, kind ASC
+     LIMIT 6`,
+  );
+  const qActiveCooldowns = dbi.prepare("SELECT COUNT(*) AS n FROM cooldowns WHERE until_at > ?");
+  const qDlqOpen = dbi.prepare("SELECT COUNT(*) AS n FROM dlq");
+  const qDuplicateHashes = dbi.prepare(
+    "SELECT COUNT(*) AS n FROM tweet_dedup WHERE expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+  );
+  const qHealth = dbi.prepare(
+    `SELECT endpoint, healthy, rate_limit_remaining, rate_limit_limit, sampled_at, monthly_used, monthly_cap
+     FROM x_health
+     ORDER BY sampled_at DESC
+     LIMIT 8`,
+  );
+  const qFollowers = dbi.prepare(
+    `SELECT followers_count, delta_24h, sampled_at
+     FROM follower_delta
+     ORDER BY sampled_at DESC
+     LIMIT 1`,
   );
 
   return {
@@ -202,6 +318,61 @@ export function makeSqliteDataSource(database?: Database.Database): TuiDataSourc
           queued: byStatus.get("queued") ?? 0,
           inProgress: byStatus.get("in_progress") ?? 0,
         },
+      };
+    },
+    operatorSnapshot(): OperatorSnapshot {
+      const reviewOpen = (qReviewOpen.get() as CountRow | undefined)?.n ?? 0;
+      const oldest = (qReviewOldest.get() as OldestRow | undefined)?.created_at ?? null;
+      const oldestMinutes = ageMinutes(oldest);
+
+      const statusRows = qActionStatus24h.all() as StatusCountRow[];
+      const byStatus = new Map(statusRows.map((r) => [r.status, r.n]));
+      const total = statusRows.reduce((acc, r) => acc + r.n, 0);
+      const byKind = (qActionKind24h.all() as KindCountRow[]).map((r) => ({
+        kind: r.kind,
+        count: r.n,
+      }));
+
+      const healthRows = qHealth.all() as HealthRow[];
+      const latestByEndpoint = new Map<string, HealthRow>();
+      for (const row of healthRows) {
+        if (!latestByEndpoint.has(row.endpoint)) latestByEndpoint.set(row.endpoint, row);
+      }
+      const latestHealth = Array.from(latestByEndpoint.values()).map((r) => ({
+        endpoint: r.endpoint,
+        healthy: r.healthy,
+        remaining: r.rate_limit_remaining,
+        limit: r.rate_limit_limit,
+        sampledAt: r.sampled_at,
+      }));
+      const monthlyUsed = healthRows.find((r) => r.monthly_used != null)?.monthly_used ?? null;
+      const monthlyCap = healthRows.find((r) => r.monthly_cap != null)?.monthly_cap ?? null;
+
+      const followers = qFollowers.get() as FollowerRow | undefined;
+
+      return {
+        review: { open: reviewOpen, oldestMinutes },
+        actions24h: {
+          total,
+          approved: byStatus.get("approved") ?? 0,
+          rejected: byStatus.get("rejected") ?? 0,
+          executed: byStatus.get("executed") ?? 0,
+          failed: byStatus.get("failed") ?? 0,
+          byKind,
+        },
+        guardrails: {
+          activeCooldowns: (qActiveCooldowns.get(Date.now()) as CountRow | undefined)?.n ?? 0,
+          dlqOpen: (qDlqOpen.get() as CountRow | undefined)?.n ?? 0,
+          recentDuplicateHashes: (qDuplicateHashes.get() as CountRow | undefined)?.n ?? 0,
+        },
+        x: { latestHealth, monthlyUsed, monthlyCap },
+        followers: followers
+          ? {
+              count: followers.followers_count,
+              delta24h: followers.delta_24h,
+              sampledAt: followers.sampled_at,
+            }
+          : null,
       };
     },
   };
@@ -274,6 +445,25 @@ export function useRunSummary(pollMs = 5000): PollState<RunSummary> {
     consolidator: { total: 0, completed: 0, failed: 0, queued: 0, inProgress: 0 },
   };
   return usePolled<RunSummary>(() => src.runSummary24h(), initial, pollMs);
+}
+
+export function useOperatorSnapshot(pollMs = 5000): PollState<OperatorSnapshot> {
+  const src = useDataSource();
+  const initial: OperatorSnapshot = {
+    review: { open: 0, oldestMinutes: null },
+    actions24h: {
+      total: 0,
+      approved: 0,
+      rejected: 0,
+      executed: 0,
+      failed: 0,
+      byKind: [],
+    },
+    guardrails: { activeCooldowns: 0, dlqOpen: 0, recentDuplicateHashes: 0 },
+    x: { latestHealth: [], monthlyUsed: null, monthlyCap: null },
+    followers: null,
+  };
+  return usePolled<OperatorSnapshot>(() => src.operatorSnapshot(), initial, pollMs);
 }
 
 export function useRecentInvocations(limit = 50, pollMs = 1000): PollState<InvocationRow[]> {

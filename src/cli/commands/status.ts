@@ -7,9 +7,49 @@ export function registerStatusCmd(program: Command, _ctx: CliContext): void {
     .command("status")
     .description("orchestrator status + recent events / actions / reasoner / consolidator rows")
     .option("--json", "emit status as JSON for programmatic checks")
-    .action(async (opts: { json?: boolean }) => {
+    .option("--metrics", "show Phase 3 health metrics dashboard")
+    .action(async (opts: { json?: boolean; metrics?: boolean }) => {
       const { db } = await import("@/db");
       const dbh = db();
+
+      if (opts.metrics) {
+        // Phase 3: Health metrics dashboard
+        const { getHealthSummary } = await import("@/metrics");
+        const metrics = getHealthSummary();
+
+        printLine("=== Phase 3 Health Metrics ===");
+        printLine("");
+
+        printLine("--- X API Health (last hour) ---");
+        if (metrics.xHealth.length === 0) {
+          printLine("  No health snapshots recorded yet");
+        } else {
+          for (const h of metrics.xHealth.slice(0, 5)) {
+            printLine(`  [${h.sampledAt}] ${h.endpoint}: ${h.healthy ? "healthy" : "degraded"}`);
+          }
+        }
+        printLine("");
+
+        printLine("--- Follower Delta ---");
+        if (metrics.followerDelta) {
+          printLine(`  Current: ${metrics.followerDelta.followersCount}`);
+          printLine(`  24h change: ${metrics.followerDelta.delta24h ?? 0}`);
+          printLine(`  Last sampled: ${metrics.followerDelta.sampledAt}`);
+        } else {
+          printLine("  No follower data recorded yet");
+        }
+        printLine("");
+
+        printLine("--- Error Rates (last 24h) ---");
+        if (metrics.errorRates.length === 0) {
+          printLine("  No errors recorded");
+        } else {
+          for (const e of metrics.errorRates.slice(0, 10)) {
+            printLine(`  [${e.hourBucket}] ${e.kind}.${e.errorCode}: ${e.count}`);
+          }
+        }
+        return;
+      }
 
       if (opts.json) {
         // JSON output for 48h sanity checks

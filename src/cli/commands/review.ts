@@ -254,4 +254,66 @@ export function registerReviewCmd(program: Command, _ctx: CliContext): void {
         }
       }
     });
+
+  // ─── Phase 2: `review gate-check` ─────────────────────────────
+  review
+    .command("gate-check")
+    .description("programmatic Phase 3 gate check — exits 0 if ready, 1 if not")
+    .option("--min-labeled <n>", "minimum labeled candidates", "100")
+    .option("--min-agreement <pct>", "minimum agreement %", "80")
+    .option("--mode <mode>", "filter by mode", "shadow")
+    .option("--json", "emit JSON result to stdout")
+    .action(
+      async (opts: { minLabeled: string; minAgreement: string; mode: string; json?: boolean }) => {
+        const { db } = await import("@/db");
+
+        const minLabeled = Number.parseInt(opts.minLabeled, 10) || 100;
+        const minAgreement = Number.parseInt(opts.minAgreement, 10) || 80;
+
+        const rows = db()
+          .prepare(
+            `SELECT status, operator_label
+           FROM action_log
+           WHERE operator_label IS NOT NULL AND mode = ?`,
+          )
+          .all(opts.mode) as Array<{ status: string; operator_label: string }>;
+
+        const total = rows.length;
+        let agree = 0;
+        let disagree = 0;
+
+        for (const r of rows) {
+          const policyApproved = r.status === "approved" || r.status === "executed";
+          if (r.operator_label === "unclear") continue;
+          const operatorGood = r.operator_label === "good";
+          if (policyApproved === operatorGood) {
+            agree++;
+          } else {
+            disagree++;
+          }
+        }
+
+        const decisive = agree + disagree;
+        const agreementPct = decisive > 0 ? (agree / decisive) * 100 : 0;
+        const gateMet = total >= minLabeled && agreementPct >= minAgreement;
+
+        if (opts.json) {
+          const result = {
+            ready: gateMet,
+            mode: opts.mode,
+            total_labeled: total,
+            min_labeled: minLabeled,
+            agreement_pct: Number(agreementPct.toFixed(2)),
+            min_agreement_pct: minAgreement,
+          };
+          printLine(JSON.stringify(result, null, 2));
+        } else {
+          printLine(gateMet ? "READY" : "NOT_READY");
+          printLine(`  labeled: ${total}/${minLabeled}`);
+          printLine(`  agreement: ${agreementPct.toFixed(2)}% (min ${minAgreement}%)`);
+        }
+
+        process.exit(gateMet ? 0 : 1);
+      },
+    );
 }

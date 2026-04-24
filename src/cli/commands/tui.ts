@@ -15,4 +15,16 @@ export function registerTuiCmd(program: Command, _ctx: CliContext): void {
         pollMs: Number.isFinite(n) && n > 0 ? n : 2000,
       });
     });
+
+  program
+    .command("cockpit")
+    .description("open the live Strand operator cockpit")
+    .option("--poll-ms <n>", "dashboard poll cadence in ms", "2000")
+    .action(async (opts: { pollMs: string }) => {
+      const n = Number(opts.pollMs);
+      await launchTui({
+        dashboard: true,
+        pollMs: Number.isFinite(n) && n > 0 ? n : 2000,
+      });
+    });
 }

@@ -1,8 +1,10 @@
 # Must match PoliciesConfigSchema in src/config.ts.
 # Values here are the *ceiling*; `effectiveCap` multiplies by ramp_multiplier.
 
+# Phase 3 configuration: like/bookmark live, all other actions shadow
+# ramp_multiplier 0.5 = half-caps during ramp-up (100 likes/day, 15 bookmarks/day)
 mode: shadow
-ramp_multiplier: 0.25
+ramp_multiplier: 0.5
 
 caps_per_day:
   posts: 6

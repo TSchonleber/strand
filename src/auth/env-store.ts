@@ -9,7 +9,6 @@ export class EnvCredentialStore implements CredentialStore {
   readonly name = "env";
 
   async get(key: string): Promise<string | undefined> {
-    // biome-ignore lint/complexity/useLiteralKeys: process.env has an index signature
     const v = process.env[key];
     return v && v.length > 0 ? v : undefined;
   }

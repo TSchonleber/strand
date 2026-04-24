@@ -11,42 +11,64 @@
  */
 
 import { env } from "@/config";
-import { Box, Text, useApp, useInput, useStdin } from "ink";
+import { Box, Text, useApp, useInput, useStdin, useStdout } from "ink";
 import type { ReactElement } from "react";
 import { useCallback, useMemo, useState } from "react";
-import { Footer, Header, InvocationsPane, RunSummaryPane, TaskGraphsPane } from "./components";
-import { useRecentInvocations, useRunSummary, useTaskGraphs } from "./hooks";
+import {
+  Footer,
+  Header,
+  HelpPanel,
+  InvocationsPane,
+  OperatorPane,
+  RunSummaryPane,
+  TaskGraphsPane,
+} from "./components";
+import { useOperatorSnapshot, useRecentInvocations, useRunSummary, useTaskGraphs } from "./hooks";
+import { splitWidths, terminalWidth } from "./layout";
 
 export interface DashboardProps {
   pollMs?: number;
   onWelcome?: () => void;
+  width?: number;
 }
 
-export function Dashboard({ pollMs = 2000, onWelcome }: DashboardProps): ReactElement {
+export function Dashboard({ pollMs = 2000, onWelcome, width }: DashboardProps): ReactElement {
   const app = useApp();
   const { isRawModeSupported } = useStdin();
+  const { stdout } = useStdout();
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [expanded, setExpanded] = useState(true);
   const [focusedPane, setFocusedPane] = useState<"graphs" | "invocations">("graphs");
   const [scrollOffset, setScrollOffset] = useState(0);
   const [lastRefreshAt, setLastRefreshAt] = useState<number>(Date.now());
   const [paused, setPaused] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   const graphs = useTaskGraphs(paused ? 10 * 60_000 : pollMs);
+  const operator = useOperatorSnapshot(paused ? 10 * 60_000 : Math.max(pollMs, 3000));
   const summary = useRunSummary(paused ? 10 * 60_000 : Math.max(pollMs * 2, 5000));
   const invocations = useRecentInvocations(50, paused ? 10 * 60_000 : Math.max(pollMs / 2, 1000));
 
   const refreshAll = useCallback((): void => {
     graphs.refresh();
+    operator.refresh();
     summary.refresh();
     invocations.refresh();
     setLastRefreshAt(Date.now());
-  }, [graphs, summary, invocations]);
+  }, [graphs, operator, summary, invocations]);
 
   useInput(
     (input, key) => {
       if (input === "q" || (key.ctrl && input === "c")) {
         app.exit();
+        return;
+      }
+      if (input === "?") {
+        setShowHelp((v) => !v);
+        return;
+      }
+      if (key.escape) {
+        if (showHelp) setShowHelp(false);
         return;
       }
       if (input === "w" && onWelcome) {
@@ -57,12 +79,15 @@ export function Dashboard({ pollMs = 2000, onWelcome }: DashboardProps): ReactEl
         refreshAll();
         return;
       }
-      if (key.tab) {
-        setFocusedPane((p) => (p === "graphs" ? "invocations" : "graphs"));
-        return;
-      }
       if (input === "p") {
         setPaused((p) => !p);
+        return;
+      }
+      if (showHelp) {
+        return;
+      }
+      if (key.tab) {
+        setFocusedPane((p) => (p === "graphs" ? "invocations" : "graphs"));
         return;
       }
       if (focusedPane === "graphs") {
@@ -97,15 +122,20 @@ export function Dashboard({ pollMs = 2000, onWelcome }: DashboardProps): ReactEl
       provider: env.LLM_PROVIDER,
       model: env.LLM_MODEL_REASONER,
       mode: env.STRAND_MODE,
+      halt: env.STRAND_HALT,
+      tier: env.TIER,
       credentialStore: process.env["STRAND_CREDENTIAL_STORE"] ?? "env",
       tenant: process.env["STRAND_TENANT"] ?? null,
     }),
     [],
   );
 
+  const viewportWidth = terminalWidth(width ?? stdout.columns);
+  const layout = splitWidths(viewportWidth);
+
   return (
     <Box flexDirection="column">
-      <Header {...header} />
+      <Header {...header} width={viewportWidth} />
       {!isRawModeSupported ? (
         <Box paddingX={1}>
           <Text color="yellow">
@@ -118,21 +148,60 @@ export function Dashboard({ pollMs = 2000, onWelcome }: DashboardProps): ReactEl
           <Text color="yellow">{"[paused] — press p to resume, r to refresh once"}</Text>
         </Box>
       ) : null}
-      <TaskGraphsPane
-        graphs={graphs.data}
-        loading={graphs.loading}
-        selectedIdx={Math.min(selectedIdx, Math.max(0, graphs.data.length - 1))}
-        expanded={expanded}
-        focused={focusedPane === "graphs"}
+      {showHelp ? (
+        <HelpPanel width={viewportWidth} focusedPane={focusedPane} paused={paused} />
+      ) : (
+        <>
+          <OperatorPane snapshot={operator.data} loading={operator.loading} width={viewportWidth} />
+          {layout.stacked ? (
+            <>
+              <TaskGraphsPane
+                graphs={graphs.data}
+                loading={graphs.loading}
+                selectedIdx={Math.min(selectedIdx, Math.max(0, graphs.data.length - 1))}
+                expanded={expanded}
+                focused={focusedPane === "graphs"}
+                width={layout.full}
+              />
+              <RunSummaryPane
+                summary={summary.data}
+                loading={summary.loading}
+                width={layout.full}
+              />
+            </>
+          ) : (
+            <Box flexDirection="row">
+              <TaskGraphsPane
+                graphs={graphs.data}
+                loading={graphs.loading}
+                selectedIdx={Math.min(selectedIdx, Math.max(0, graphs.data.length - 1))}
+                expanded={expanded}
+                focused={focusedPane === "graphs"}
+                width={layout.left}
+              />
+              <Box width={layout.gap} />
+              <RunSummaryPane
+                summary={summary.data}
+                loading={summary.loading}
+                width={layout.right}
+              />
+            </Box>
+          )}
+          <InvocationsPane
+            rows={invocations.data}
+            loading={invocations.loading}
+            focused={focusedPane === "invocations"}
+            scrollOffset={scrollOffset}
+            width={viewportWidth}
+          />
+        </>
+      )}
+      <Footer
+        focusedPane={focusedPane}
+        lastRefreshAt={lastRefreshAt}
+        paused={paused}
+        width={viewportWidth}
       />
-      <RunSummaryPane summary={summary.data} loading={summary.loading} />
-      <InvocationsPane
-        rows={invocations.data}
-        loading={invocations.loading}
-        focused={focusedPane === "invocations"}
-        scrollOffset={scrollOffset}
-      />
-      <Footer focusedPane={focusedPane} lastRefreshAt={lastRefreshAt} />
     </Box>
   );
 }

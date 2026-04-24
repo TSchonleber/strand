@@ -59,6 +59,7 @@ describe("strand CLI", () => {
     for (const sub of [
       "run",
       "tui",
+      "cockpit",
       "status",
       "review",
       "tasks",

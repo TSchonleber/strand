@@ -19,6 +19,43 @@ export { OAuthCredentialStore, type OAuthProviderStrategy } from "./oauth-store"
 export { makeXOAuthStrategy } from "./oauth-x";
 export { TenantScopedCredentialStore } from "./tenant-store";
 
+// Cockpit auth — provider registry, auth store, external discovery, device-code
+export {
+  type AuthMode,
+  type AuthSource,
+  type AuthType,
+  type HostConstraint,
+  type ProviderId,
+  type ProviderDef,
+  ProviderIdSchema,
+  AuthTypeSchema,
+  availableAuthModes,
+  getProvider,
+  listProviders,
+  requiresBaseUrl,
+} from "./provider-registry";
+export {
+  type AuthEntry,
+  type AuthStoreData,
+  AuthStoreDataSchema,
+  CockpitAuthStore,
+} from "./auth-store";
+export {
+  type ExternalCredentialResult,
+  discoverAllExternalCredentials,
+  discoverClaudeCodeCredentials,
+  discoverGeminiCliCredentials,
+} from "./external-discovery";
+export {
+  type DeviceCodeHttpClient,
+  type TokenPollResult,
+  type TokenSet,
+  type UserCodeResponse,
+  DeviceCodeError,
+  OpenAIDeviceCodeClient,
+  runDeviceCodeFlow,
+} from "./device-code";
+
 let _default: CredentialStore | null = null;
 
 /**
