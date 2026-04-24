@@ -10,6 +10,7 @@
  */
 
 import type { TaskGraph } from "@/agent/types";
+import { COLS, Header, badge, formatKV, pad, sectionLine, truncate } from "@/cli/tui/components";
 import {
   DataSourceContext,
   type InvocationRow,
@@ -93,6 +94,119 @@ function makeStubSource(): TuiDataSource {
     runSummary24h: () => summary,
   };
 }
+
+// ─── Layout helper unit tests ─────────────────────────────────────────────
+
+describe("layout helpers", () => {
+  it("truncate clips long strings with ellipsis", () => {
+    expect(truncate("hello world", 8)).toBe("hello w\u2026");
+    expect(truncate("short", 10)).toBe("short");
+    expect(truncate("exact", 5)).toBe("exact");
+  });
+
+  it("pad right-pads to target width", () => {
+    expect(pad("hi", 5)).toBe("hi   ");
+    expect(pad("hello", 3)).toBe("hello");
+  });
+
+  it("formatKV builds fixed-width key-value pairs", () => {
+    const kv = formatKV("mode", "shadow", 10);
+    expect(kv).toBe("mode: shadow    ");
+    expect(kv).toHaveLength(16);
+  });
+
+  it("formatKV truncates long values", () => {
+    const kv = formatKV("provider", "xai/grok-4.20-reasoning-super-long-model-name", 20);
+    expect(kv).toHaveLength(30);
+    expect(kv).toContain("\u2026");
+  });
+
+  it("badge builds compact count+label", () => {
+    expect(badge(42, "ticks", 12)).toBe("42 ticks    ");
+    expect(badge(0, "wip", 7)).toBe("0 wip  ");
+  });
+
+  it("sectionLine fills to COLS with dashes", () => {
+    const line = sectionLine("test");
+    expect(line).toHaveLength(COLS);
+    expect(line).toMatch(/^\u2500\u2500\u2500 test \u2500+$/);
+  });
+
+  it("sectionLine with empty title produces plain rule", () => {
+    const line = sectionLine("");
+    expect(line).toHaveLength(COLS);
+    expect(line).toMatch(/^\u2500+$/);
+  });
+});
+
+// ─── Cockpit header rendering ─────────────────────────────────────────────
+
+describe("cockpit header", () => {
+  it("renders provider and mode on a single stable line", () => {
+    const tree = createElement(Header, {
+      provider: "xai",
+      model: "grok-4.20-reasoning",
+      mode: "shadow",
+      credentialStore: "env",
+      tenant: null,
+    });
+    const { lastFrame, unmount } = render(tree);
+    const frame = lastFrame() ?? "";
+
+    expect(frame).toContain("Strand TUI");
+    expect(frame).toContain("provider:");
+    expect(frame).toContain("xai/grok-4.20-reasoning");
+    expect(frame).toContain("mode:");
+    expect(frame).toContain("shadow");
+    expect(frame).toContain("store:");
+
+    const lines = frame.split("\n");
+    const providerLine = lines.find((l) => l.includes("provider:"));
+    expect(providerLine).toBeDefined();
+    expect(providerLine).toContain("mode:");
+
+    unmount();
+  });
+
+  it("truncates long provider/model with ellipsis", () => {
+    const tree = createElement(Header, {
+      provider: "openai-compatible",
+      model: "some-very-long-model-name-that-exceeds-budget",
+      mode: "gated",
+      credentialStore: "file",
+      tenant: "acme",
+    });
+    const { lastFrame, unmount } = render(tree);
+    const frame = lastFrame() ?? "";
+
+    expect(frame).toContain("\u2026");
+    expect(frame).not.toContain("some-very-long-model-name-that-exceeds-budget");
+    expect(frame).toContain("gated");
+    expect(frame).toContain("acme");
+
+    unmount();
+  });
+
+  it("section dividers span full width", () => {
+    const tree = createElement(Header, {
+      provider: "xai",
+      model: "grok",
+      mode: "shadow",
+      credentialStore: "env",
+      tenant: null,
+    });
+    const { lastFrame, unmount } = render(tree);
+    const frame = lastFrame() ?? "";
+
+    const lines = frame.split("\n");
+    const ruleLine = lines.find((l) => /^\u2500{10,}$/.test(l.trim()));
+    expect(ruleLine).toBeDefined();
+
+    unmount();
+  });
+});
+
+// ─── Dashboard smoke tests ────────────────────────────────────────────────
 
 describe("strand tui dashboard", () => {
   it("renders a non-empty frame with mocked data", () => {

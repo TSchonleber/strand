@@ -78,6 +78,41 @@ function fmtUsdFromTicks(ticks: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
+// ─── Layout helpers (fixed-width cockpit) ───────────────────────────────────
+
+/** Cockpit content width: 80 cols minus paddingX=1 on each side. */
+export const COLS = 78;
+
+/** Truncate to n chars; append ellipsis if clipped. */
+export function truncate(s: string, n: number): string {
+  if (s.length <= n) return s;
+  return `${s.slice(0, Math.max(0, n - 1))}\u2026`;
+}
+
+/** Right-pad to exactly n chars (no-op if already wider). */
+export function pad(s: string, n: number): string {
+  if (s.length >= n) return s;
+  return s + " ".repeat(n - s.length);
+}
+
+/** "label: value" with value truncated+padded to valueWidth. */
+export function formatKV(label: string, value: string, valueWidth: number): string {
+  return `${label}: ${pad(truncate(value, valueWidth), valueWidth)}`;
+}
+
+/** Compact badge: "count label" padded to width. */
+export function badge(count: number | string, label: string, width: number): string {
+  return pad(`${count} ${label}`, width);
+}
+
+/** Section divider filling width: "─── title ───────…" */
+export function sectionLine(title: string, width: number = COLS): string {
+  if (!title) return "\u2500".repeat(width);
+  const prefix = `\u2500\u2500\u2500 ${title} `;
+  if (prefix.length >= width) return prefix.slice(0, width);
+  return prefix + "\u2500".repeat(width - prefix.length);
+}
+
 // ─── Header ─────────────────────────────────────────────────────────────────
 
 export interface HeaderProps {
@@ -89,30 +124,29 @@ export interface HeaderProps {
 }
 
 export function Header(props: HeaderProps): ReactElement {
+  const pv = truncate(`${props.provider}/${props.model}`, 28);
+  const modeColor = props.mode === "live" ? "red" : props.mode === "gated" ? "yellow" : "green";
   return (
     <Box flexDirection="column" paddingX={1} paddingY={0}>
-      <Box>
+      <Text>
         <Text bold color="magenta">
-          Strand TUI
+          {"Strand TUI"}
         </Text>
-        <Text color="gray"> — live agent harness</Text>
-      </Box>
-      <Box>
-        <Text color="gray">provider: </Text>
-        <Text color="white">
-          {props.provider}/{props.model}
-        </Text>
-        <Text color="gray"> mode: </Text>
-        <Text color={props.mode === "live" ? "red" : props.mode === "gated" ? "yellow" : "green"}>
-          {props.mode}
-        </Text>
-      </Box>
-      <Box>
-        <Text color="gray">credential store: </Text>
-        <Text>{props.credentialStore}</Text>
-        <Text color="gray"> tenant: </Text>
+        <Text color="gray">{" \u2014 live agent harness"}</Text>
+      </Text>
+      <Text>
+        <Text color="gray">{"provider: "}</Text>
+        <Text color="white">{pad(pv, 28)}</Text>
+        <Text color="gray">{"  mode: "}</Text>
+        <Text color={modeColor}>{props.mode}</Text>
+      </Text>
+      <Text>
+        <Text color="gray">{"store: "}</Text>
+        <Text>{pad(props.credentialStore, 8)}</Text>
+        <Text color="gray">{"  tenant: "}</Text>
         <Text>{props.tenant ?? "\u2014"}</Text>
-      </Box>
+      </Text>
+      <Text color="gray">{sectionLine("")}</Text>
     </Box>
   );
 }
@@ -173,12 +207,10 @@ function GraphLine({ g, selected }: { g: TaskGraph; selected: boolean }): ReactE
 }
 
 export function TaskGraphsPane(props: TaskGraphsPaneProps): ReactElement {
+  const heading = `active task graphs${props.focused ? " [focused]" : ""}`;
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text color={props.focused ? "cyan" : "gray"}>
-        {"─── active task graphs "}
-        {props.focused ? "[focused]" : ""}
-      </Text>
+      <Text color={props.focused ? "cyan" : "gray"}>{sectionLine(heading)}</Text>
       {props.loading && props.graphs.length === 0 ? (
         <Box>
           <Text color="gray">
@@ -213,25 +245,22 @@ export function RunSummaryPane(props: RunSummaryPaneProps): ReactElement {
   const c = props.summary.consolidator;
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text color="gray">{"─── recent runs (24h)"}</Text>
-      <Box>
-        <Text color="gray">reasoner: </Text>
-        <Text>{r.ticks} ticks · </Text>
-        <Text>{r.candidates} candidates · </Text>
-        <Text>{r.toolCalls} tool calls · </Text>
+      <Text color="gray">{sectionLine("recent runs (24h)")}</Text>
+      <Text>
+        <Text color="gray">{pad("reasoner", 13)}</Text>
+        <Text>{badge(r.ticks, "ticks", 12)}</Text>
+        <Text>{badge(r.candidates, "cands", 12)}</Text>
+        <Text>{badge(r.toolCalls, "tools", 12)}</Text>
         <Text color="yellow">{fmtUsdFromTicks(r.costUsdTicks)}</Text>
-      </Box>
-      <Box>
-        <Text color="gray">consolidator: </Text>
-        <Text>{c.total} runs · </Text>
-        <Text color="green">{c.completed} completed</Text>
-        <Text> · </Text>
-        <Text color="red">{c.failed} failed</Text>
-        <Text> · </Text>
-        <Text color="cyan">{c.inProgress} in-progress</Text>
-        <Text> · </Text>
-        <Text color="gray">{c.queued} queued</Text>
-      </Box>
+      </Text>
+      <Text>
+        <Text color="gray">{pad("consolidator", 13)}</Text>
+        <Text>{badge(c.total, "runs", 10)}</Text>
+        <Text color="green">{badge(c.completed, "ok", 7)}</Text>
+        <Text color="red">{badge(c.failed, "fail", 8)}</Text>
+        <Text color="cyan">{badge(c.inProgress, "wip", 7)}</Text>
+        <Text color="gray">{badge(c.queued, "queued", 10)}</Text>
+      </Text>
     </Box>
   );
 }
@@ -252,13 +281,12 @@ export function InvocationsPane(props: InvocationsPaneProps): ReactElement {
   const start = Math.min(Math.max(0, props.scrollOffset), Math.max(0, total - 1));
   const visible = props.rows.slice(start, start + maxRows);
 
+  const focusTag = props.focused ? " [focused]" : "";
+  const invTitle = `tool invocations${focusTag} (${visible.length}/${total})`;
+
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text color={props.focused ? "cyan" : "gray"}>
-        {"─── tool invocations "}
-        {props.focused ? "[focused] " : ""}
-        (showing {visible.length}/{total})
-      </Text>
+      <Text color={props.focused ? "cyan" : "gray"}>{sectionLine(invTitle)}</Text>
       {total === 0 ? (
         <Text color="gray"> (no invocations yet)</Text>
       ) : (
