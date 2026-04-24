@@ -28,3 +28,24 @@ export type {
   SkillProposalStore,
 } from "./auto-create";
 export { SqliteSkillProposalStore, makeSqliteSkillProposalStore } from "./proposal-store";
+
+// Skill lifecycle (§6):
+export {
+  SkillRecordStore,
+  SkillDecisionStore,
+  acceptProposal,
+  rejectProposal,
+  runNightlyScorer,
+  toBrainctlDecisionEvent,
+  tokenCostP50,
+  tokenCostP95,
+} from "./lifecycle";
+export type {
+  BrainctlDecisionEvent,
+  ScorerOpts,
+  ScorerResult,
+  SkillDecision,
+  SkillRecord,
+  SkillStatus,
+  UsageEvent,
+} from "./lifecycle";

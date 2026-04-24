@@ -234,3 +234,35 @@ CREATE TABLE IF NOT EXISTS error_rates (
 );
 CREATE INDEX IF NOT EXISTS idx_error_rates_hour ON error_rates(hour_bucket);
 CREATE INDEX IF NOT EXISTS idx_error_rates_kind ON error_rates(kind, hour_bucket);
+
+-- Skill lifecycle: executable skill records (§6 of cockpit design spec)
+-- Markdown files in src/agent/skills/*.md are the human-readable source;
+-- this table tracks runtime metrics, trust scores, and lifecycle status.
+CREATE TABLE IF NOT EXISTS skill_records (
+  name TEXT PRIMARY KEY,                 -- matches frontmatter `name`
+  status TEXT NOT NULL DEFAULT 'active', -- active | retired | draft | queued_draft | queued_retire
+  usage_count INTEGER NOT NULL DEFAULT 0,
+  success_count INTEGER NOT NULL DEFAULT 0,
+  token_cost_samples_json TEXT,          -- JSON array of recent token costs for p50/p95
+  last_used_at TEXT,
+  trust_score REAL NOT NULL DEFAULT 1.0, -- 0.0–1.0
+  triggers_json TEXT,                    -- JSON array of trigger strings
+  supersedes_json TEXT,                  -- JSON array of skill names this supersedes
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_skill_records_status ON skill_records(status);
+
+-- Skill lifecycle decisions (accept/reject proposals, brainctl decision events)
+CREATE TABLE IF NOT EXISTS skill_decisions (
+  id TEXT PRIMARY KEY,
+  skill_name TEXT NOT NULL,
+  proposal_kind TEXT NOT NULL,           -- draft | retire
+  decision TEXT NOT NULL,                -- accepted | rejected
+  decided_by TEXT NOT NULL,              -- user | auto
+  rationale TEXT,
+  suppressed_until TEXT,                 -- rejection suppresses re-proposal for 30 days
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_skill_decisions_skill ON skill_decisions(skill_name);
+CREATE INDEX IF NOT EXISTS idx_skill_decisions_suppressed ON skill_decisions(suppressed_until);
