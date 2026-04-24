@@ -178,6 +178,35 @@ export async function fetchDmEvents(opts: { sinceId?: string; max?: number } = {
   }
 }
 
+export async function fetchUser(): Promise<{
+  id: string;
+  name: string;
+  username: string;
+  followersCount: number;
+  followingCount: number;
+  listedCount: number;
+}> {
+  const client = await userClient();
+  const id = await userId();
+  const res = await client.v2.user(id, {
+    "user.fields": ["public_metrics"],
+  });
+  const u = res.data;
+  const metrics = u.public_metrics as {
+    followers_count?: number;
+    following_count?: number;
+    listed_count?: number;
+  };
+  return {
+    id: u.id,
+    name: u.name,
+    username: u.username,
+    followersCount: metrics?.followers_count ?? 0,
+    followingCount: metrics?.following_count ?? 0,
+    listedCount: metrics?.listed_count ?? 0,
+  };
+}
+
 // ─── WRITE ───────────────────────────────────────────────────
 
 export interface WriteResult {

@@ -159,11 +159,132 @@ can attribute label quality to a specific prompt version.
 
 Before enabling low-risk live actions (`like` + `bookmark`):
 
+- [ ] `pnpm strand review gate-check` exits 0 (≥100 labeled, ≥80% agreement)
 - [ ] `pnpm strand review agreement --json | jq '.gate.met'` → `true`
-  (≥100 labeled candidates AND ≥80% agreement in `mode=shadow`)
+  (confirms same criteria with full confusion matrix)
 - [ ] Confusion matrix shows no systematic `false_approve` bias
   (i.e. policy approves ≤5 actions the operator would reject)
 - [ ] No `reasoner.candidate_cap_enforced` warnings sustained over ≥48h
   (model consistently emits ≤5 — overrun implies prompt drift)
 - [ ] Actor dry-run verified: `action_log` rows show `status='executed'` in
   shadow mode with the write path short-circuited before the X API call
+
+## Phase 3: Low-risk actions live
+
+In Phase 3 the Actor enables **only** `like` and `bookmark` in live mode. All
+other actions (`reply`, `quote`, `post`, `follow`, `dm`) remain in shadow mode
+even when `STRAND_MODE=live`.
+
+### Phase 3 gate checklist
+
+Before enabling live actions:
+
+```bash
+# 1. Verify gate criteria met (≥100 labeled, ≥80% agreement)
+pnpm strand review gate-check
+
+# 2. Verify half-caps configured (ramp_multiplier should be 0.5)
+cat config/policies.yaml | grep ramp_multiplier  # should be 0.5
+
+# 3. Check metrics baseline (run for 24h in shadow with metrics enabled)
+pnpm strand status --metrics
+```
+
+### Enabling live mode
+
+```bash
+# 1. Confirm readiness
+pnpm strand review gate-check --json | jq '.ready'  # should be true
+
+# 2. Set live mode (only like/bookmark will actually go live)
+export STRAND_MODE=live
+export STRAND_HALT=false
+
+# 3. Restart orchestrator
+pkill -SIGTERM -f "strand start"
+pnpm strand start &
+
+# 4. Record transition
+echo "Phase 3 live start: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ./data/phase3.log
+```
+
+### Phase 3 kill switch (drain mode)
+
+If anything goes wrong, the kill switch implements drain semantics:
+
+```bash
+# STRAND_HALT stops the Reasoner (no new candidates)
+# Perceiver continues (reads are safe)
+# In-flight actions complete; new actions are rejected
+export STRAND_HALT=true
+```
+
+Verify drain state:
+```bash
+# Check halt is active
+pnpm strand status --json | jq '.env.strand_halt'  # should be "true"
+
+# Check no new candidates being emitted (reasoner_runs should stop growing)
+pnpm strand status | grep reasoner_runs
+```
+
+### Monitoring Phase 3 health
+
+Check metrics dashboard every 4 hours:
+
+```bash
+# Full metrics dashboard
+pnpm strand status --metrics
+
+# Key metrics to watch:
+# - X API health: rate limits healthy, monthly cap < 50%
+# - Follower delta: no sudden negative spikes (>10% drop)
+# - Error rates: < 5% failure rate on like/bookmark
+```
+
+### Cap enforcement (half-caps during ramp-up)
+
+Phase 3 uses `ramp_multiplier: 0.5` in `policies.yaml`:
+
+| Action | Daily Cap (full) | Phase 3 Cap (0.5x) |
+|--------|------------------|-------------------|
+| likes | 200 | 100 |
+| bookmarks | 50 | 25 |
+
+Verify caps in effect:
+```bash
+# Check action_log for cap enforcement
+sqlite3 ./data/strand.db "SELECT kind, COUNT(*) FROM action_log WHERE status='executed' AND created_at > datetime('now', '-24 hours') GROUP BY kind"
+```
+
+### Rollback to shadow
+
+If you need to revert:
+
+```bash
+# 1. Halt first (drain in-flight)
+export STRAND_HALT=true
+sleep 30  # wait for drain
+
+# 2. Switch back to shadow
+export STRAND_MODE=shadow
+export STRAND_HALT=false
+
+# 3. Restart
+pkill -SIGTERM -f "strand start"
+pnpm strand start &
+
+# 4. Record rollback
+echo "Phase 3 rollback: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ./data/phase3.log
+```
+
+### Gate to Phase 4
+
+Before enabling `reply` live:
+
+- [ ] Phase 3 ran clean for ≥ 72 hours
+- [ ] `like` and `bookmark` error rate < 1%
+- [ ] No X rate limit 429s sustained
+- [ ] Follower delta stable (no negative trend)
+- [ ] `pnpm strand review agreement --mode=live` shows ≥90% agreement
+- [ ] Human review queue shows manageable volume

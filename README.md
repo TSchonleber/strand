@@ -11,6 +11,7 @@ strand init                      # first-run wizard — pick provider, store key
 strand doctor                    # preflight health check
 strand run "summarize the README and commit a rewrite"   # one-shot agentic plan
 strand tui                       # welcome splash · [d] live dashboard
+strand cockpit                   # live operator cockpit for a pinned terminal
 strand status                    # orchestrator + reasoner/consolidator summary
 strand tasks list                # persisted TaskGraphs
 strand tasks show <id>           # graph + steps + reflections

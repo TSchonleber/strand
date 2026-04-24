@@ -13,6 +13,7 @@ import type { TaskGraph } from "@/agent/types";
 import {
   DataSourceContext,
   type InvocationRow,
+  type OperatorSnapshot,
   type RunSummary,
   type TuiDataSource,
 } from "@/cli/tui/hooks";
@@ -20,6 +21,10 @@ import { Dashboard } from "@/cli/tui/index";
 import { render } from "ink-testing-library";
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
+
+function stripAnsi(s: string): string {
+  return s.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g"), "");
+}
 
 function makeStubSource(): TuiDataSource {
   const graph: TaskGraph = {
@@ -87,10 +92,45 @@ function makeStubSource(): TuiDataSource {
     consolidator: { total: 7, completed: 2, failed: 1, queued: 4, inProgress: 0 },
   };
 
+  const operator: OperatorSnapshot = {
+    review: { open: 3, oldestMinutes: 91 },
+    actions24h: {
+      total: 12,
+      approved: 2,
+      rejected: 4,
+      executed: 5,
+      failed: 1,
+      byKind: [
+        { kind: "reply", count: 5 },
+        { kind: "like", count: 4 },
+      ],
+    },
+    guardrails: { activeCooldowns: 8, dlqOpen: 0, recentDuplicateHashes: 2 },
+    x: {
+      monthlyUsed: 120,
+      monthlyCap: 10_000,
+      latestHealth: [
+        {
+          endpoint: "mentions",
+          healthy: 1,
+          remaining: 177,
+          limit: 180,
+          sampledAt: "2026-04-20T15:04:00.000Z",
+        },
+      ],
+    },
+    followers: {
+      count: 1234,
+      delta24h: 6,
+      sampledAt: "2026-04-20T15:04:00.000Z",
+    },
+  };
+
   return {
     listActiveTaskGraphs: () => [graph],
     recentInvocations: () => invocations,
     runSummary24h: () => summary,
+    operatorSnapshot: () => operator,
   };
 }
 
@@ -107,8 +147,14 @@ describe("strand tui dashboard", () => {
     const frame = lastFrame() ?? "";
     expect(frame.length).toBeGreaterThan(0);
     // Header renders provider + mode
-    expect(frame).toContain("Strand TUI");
+    expect(frame).toContain("STRAND COCKPIT");
     expect(frame).toContain("shadow");
+    // Operator cockpit shows guardrails + queue shape
+    expect(frame).toContain("operator cockpit");
+    expect(frame).toContain("review 3 open");
+    expect(frame).toContain("reply:5");
+    expect(frame).toContain("120/10000");
+    expect(frame).toContain("followers");
     // A fake graph appears
     expect(frame).toContain("crawl site X and summarize");
     expect(frame).toContain("fetch home page");
@@ -140,6 +186,20 @@ describe("strand tui dashboard", () => {
         },
         consolidator: { total: 0, completed: 0, failed: 0, queued: 0, inProgress: 0 },
       }),
+      operatorSnapshot: () => ({
+        review: { open: 0, oldestMinutes: null },
+        actions24h: {
+          total: 0,
+          approved: 0,
+          rejected: 0,
+          executed: 0,
+          failed: 0,
+          byKind: [],
+        },
+        guardrails: { activeCooldowns: 0, dlqOpen: 0, recentDuplicateHashes: 0 },
+        x: { latestHealth: [], monthlyUsed: null, monthlyCap: null },
+        followers: null,
+      }),
     };
     const tree = createElement(
       DataSourceContext.Provider,
@@ -148,9 +208,44 @@ describe("strand tui dashboard", () => {
     );
     const { lastFrame, unmount } = render(tree);
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("Strand TUI");
+    expect(frame).toContain("STRAND COCKPIT");
     expect(frame).toContain("(no active graphs)");
     expect(frame).toContain("(no invocations yet)");
+    unmount();
+  });
+
+  it("keeps every rendered line inside 80 columns", () => {
+    const source = makeStubSource();
+    const tree = createElement(
+      DataSourceContext.Provider,
+      { value: source },
+      createElement(Dashboard, { pollMs: 10_000, width: 80 }),
+    );
+    const { lastFrame, unmount } = render(tree);
+    const frame = stripAnsi(lastFrame() ?? "");
+    const tooWide = frame.split("\n").filter((line) => line.length > 80);
+
+    expect(tooWide).toEqual([]);
+    unmount();
+  });
+
+  it("opens a width-safe help panel from ?", async () => {
+    const source = makeStubSource();
+    const tree = createElement(
+      DataSourceContext.Provider,
+      { value: source },
+      createElement(Dashboard, { pollMs: 10_000, width: 80 }),
+    );
+    const { lastFrame, stdin, unmount } = render(tree);
+
+    stdin.write("?");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const frame = stripAnsi(lastFrame() ?? "");
+    expect(frame).toContain("help / cockpit controls");
+    expect(frame).toContain("toggle this help menu");
+    expect(frame).toContain("switch focus between graphs and tools");
+    expect(frame.split("\n").filter((line) => line.length > 80)).toEqual([]);
     unmount();
   });
 });

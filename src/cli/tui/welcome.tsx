@@ -124,6 +124,7 @@ export function Welcome({ commands, tools, onDashboard }: WelcomeProps): ReactEl
 
 export const DEFAULT_COMMANDS: WelcomeEntry[] = [
   { name: "run <goal>", description: "one-shot agentic plan" },
+  { name: "cockpit", description: "live operator cockpit" },
   { name: "tui", description: "this welcome (+ --dashboard)" },
   { name: "status", description: "orchestrator + runs summary" },
   { name: "tasks", description: "inspect persisted task graphs" },

@@ -3,6 +3,7 @@ import * as x from "@/clients/x";
 import { checkMonthlyCapHalt, incrementMonthlyUsage, isActorHalted } from "@/clients/x";
 import { env } from "@/config";
 import { db } from "@/db";
+import { recordActionError } from "@/metrics";
 import { recordActionCooldowns } from "@/policy/cooldowns";
 import { recordPostText } from "@/policy/duplicates";
 import type { Candidate } from "@/types/actions";
@@ -67,8 +68,12 @@ export async function executeApproved(
       env.STRAND_MODE,
     );
 
-  if (env.STRAND_MODE === "shadow") {
-    log.info({ key, kind: c.action.kind }, "actor.shadow");
+  // Phase 3: only like and bookmark are live; everything else stays shadow
+  const isLowRisk = c.action.kind === "like" || c.action.kind === "bookmark";
+  const isShadow = env.STRAND_MODE === "shadow" || (!isLowRisk && env.STRAND_MODE === "live");
+
+  if (isShadow) {
+    log.info({ key, kind: c.action.kind, reason: env.STRAND_MODE === "shadow" ? "mode_shadow" : "phase3_non_lowrisk" }, "actor.shadow");
     db().prepare("UPDATE action_log SET status = 'executed' WHERE idempotency_key = ?").run(key);
     return;
   }
@@ -131,6 +136,9 @@ export async function executeApproved(
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     const code = (err as { code?: string } | null)?.code ?? "UNKNOWN";
+
+    // Record error rate for metrics
+    recordActionError(c.action.kind, code);
 
     db()
       .prepare(

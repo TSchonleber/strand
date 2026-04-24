@@ -179,3 +179,58 @@ CREATE TABLE IF NOT EXISTS tweet_dedup (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tweet_dedup_expires ON tweet_dedup(expires_at);
+
+-- Phase 3: Metrics tracking tables
+
+-- X API health snapshot (poll every 15 min)
+CREATE TABLE IF NOT EXISTS x_health (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sampled_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  endpoint TEXT NOT NULL,           -- 'mentions', 'timeline', 'dm', 'like', 'bookmark', etc.
+  rate_limit_remaining INTEGER,     -- x-rate-limit-remaining header
+  rate_limit_limit INTEGER,         -- x-rate-limit-limit header
+  rate_limit_reset INTEGER,         -- x-rate-limit-reset header (unix seconds)
+  monthly_cap INTEGER,              -- tier cap (10k basic, 1m pro)
+  monthly_used INTEGER,             -- current usage estimate
+  healthy INTEGER NOT NULL DEFAULT 1  -- 1 = healthy, 0 = degraded
+);
+CREATE INDEX IF NOT EXISTS idx_x_health_sampled ON x_health(sampled_at);
+CREATE INDEX IF NOT EXISTS idx_x_health_endpoint ON x_health(endpoint, sampled_at);
+
+-- Mention sentiment baseline (computed from perceived_events text)
+CREATE TABLE IF NOT EXISTS mention_sentiment (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL REFERENCES perceived_events(id) ON DELETE CASCADE,
+  sampled_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  sentiment_score REAL,             -- -1 (negative) to +1 (positive), NULL if not computed
+  magnitude REAL,                   -- confidence in sentiment score
+  model TEXT,                       -- model used for sentiment analysis
+  error TEXT                        -- error message if sentiment computation failed
+);
+CREATE INDEX IF NOT EXISTS idx_mention_sentiment_sampled ON mention_sentiment(sampled_at);
+CREATE INDEX IF NOT EXISTS idx_mention_sentiment_event ON mention_sentiment(event_id);
+
+-- Follower delta tracking (poll every 1 hour)
+CREATE TABLE IF NOT EXISTS follower_delta (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sampled_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  followers_count INTEGER NOT NULL,
+  following_count INTEGER,
+  listed_count INTEGER,
+  delta_1h INTEGER,                 -- change from 1 hour ago
+  delta_24h INTEGER,              -- change from 24 hours ago
+  delta_7d INTEGER                -- change from 7 days ago
+);
+CREATE INDEX IF NOT EXISTS idx_follower_delta_sampled ON follower_delta(sampled_at);
+
+-- Error rates by action kind and error code (aggregated hourly)
+CREATE TABLE IF NOT EXISTS error_rates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  hour_bucket TEXT NOT NULL,        -- '2025-01-15T14:00:00Z' format
+  kind TEXT NOT NULL,               -- action kind or 'all'
+  error_code TEXT NOT NULL,         -- specific error code or 'TOTAL'
+  count INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(hour_bucket, kind, error_code)
+);
+CREATE INDEX IF NOT EXISTS idx_error_rates_hour ON error_rates(hour_bucket);
+CREATE INDEX IF NOT EXISTS idx_error_rates_kind ON error_rates(kind, hour_bucket);
