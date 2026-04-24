@@ -15,13 +15,30 @@ Architecture reference: [NousResearch/hermes-agent](https://github.com/NousResea
 
 ---
 
+## Cross-cutting principle: LEAN BY DEFAULT
+
+Every token in Strand's own runtime costs the operator money. The cockpit is the operator's *interface to agents*, not an agent itself — it should add the smallest possible context footprint on top of the user's prompt.
+
+**Enforced everywhere:**
+- No skill bodies in the system prompt. Skills are retrieved JIT (top-K=3 by default, configurable down to 0).
+- No background-loop telemetry in chat context. Systems drawer is off by default.
+- Subagents default to `--bare` + minimal `--allowedTools` when the auth mode permits (see hard constraint #7).
+- Reflexion judge defaults to the cheapest capable model (Haiku / GPT-4o-mini / Grok-4-fast). Never the reasoner.
+- Context compaction default flips from `noop` → `summarizing` (`thresholdRatio: 0.75`, `keepTailTurns: 8`, `summarizerMaxOutputTokens: 800`).
+- Event schema is lean — chunks are byte-sized, no giant base64 payloads through the renderer protocol.
+- Every provider call logs `usage.{input,cached,output}_tokens` + prompt_cache_key. Unused cache = bug.
+
+If a feature adds context weight to the main chat without a direct operator-visible benefit, it's wrong by default.
+
+---
+
 ## Hard constraints (non-negotiable)
 
 These are contracts every stream owner tests against, not prose to read once.
 
 1. **Policy-gate preservation.** Any chat-driven action that maps to an X/Twitter action kind MUST still flow through the existing `Candidate<Approved>` typestate gate in `src/policy/index.ts`. Subagents propose `Candidate<Unchecked>`; only the gate mints `Approved`. Enforced at compile time — TS should refuse a bypass path. Property tests in S1.
 
-2. **Renderer protocol is pinned in §4 of this spec.** Breaking changes bump the `X-Cockpit-Protocol` header major version. Ink renderer (Devin-path) and Web renderer (Devin-path) consume the identical schema. Schema drift = P0 bug.
+2. **Renderer protocol is pinned in §4 of this spec.** Breaking changes bump the `X-Cockpit-Protocol` header major version. Ink and Web renderers consume the identical schema. Schema drift = P0 bug.
 
 3. **`oauth_external` credential reuse is local-only; `oauth_device_code` works anywhere.** BYOK works anywhere. The auth picker tells the user which modes are available based on whether the cockpit is running on the same machine as their logged-in `claude` / `codex` / `gemini` CLI.
 
@@ -31,7 +48,9 @@ These are contracts every stream owner tests against, not prose to read once.
 
 6. **Skill retirement is queued, not silent.** v1 ships with auto-retire proposals landing in a review feed; user approves with one click. Flip to silent after usage data validates the signal.
 
-7. **Claude Code handling contract (`--bare` gotcha).** Bare mode skips OAuth and requires `ANTHROPIC_API_KEY`. The `cli-process` backend's Claude Code parser never passes `--bare` when the user's auth mode is `oauth_external`. If the cockpit is in BYOK-Anthropic mode AND the user wants `--bare`, wire it through — otherwise don't.
+7. **Claude Code handling contract (`--bare` gotcha).** Bare mode skips OAuth and requires `ANTHROPIC_API_KEY`. The `cli-process` backend's Claude Code parser never passes `--bare` when the user's auth mode is `oauth_external`. In BYOK-Anthropic mode, `--bare` is the **default** for subagent spawns (fastest startup, lowest token overhead) — operator can opt in to full-context mode per-spawn.
+
+8. **Lean budget defaults.** Default budgets per cockpit session: `tokens: 50_000`, `usdTicks: 2_000_000` ($0.002), `wallClockMs: 300_000`, `toolCalls: 40`. Subagent spawns get half their parent's remaining budget by default. Operator can raise per-session; the default is set to yell early on bloat.
 
 ---
 
@@ -71,7 +90,7 @@ This is the structural refactor that everything else depends on. The hermes code
 
 | Layer | What it is | Examples |
 |---|---|---|
-| **Provider** | Chat completions source — where tokens come from | `anthropic-api`, `openai-api`, `xai-api`, `gemini-api`, `openai-compat` (Ollama / LM Studio / OpenRouter / Together), `nous-portal` |
+| **Provider** | Chat completions source — where tokens come from | `anthropic-api`, `openai-api`, `xai-api`, `gemini-api`, `openai-compat` (Ollama / LM Studio / OpenRouter / Together) |
 | **Subagent** | Delegatable worker the main agent spawns | `internal`, `cli-process` (generic), `ssh` |
 | **Skill** | Markdown instruction telling the agent *when* to use a provider / tool / subagent | `claude-code.md`, `codex.md`, `pr-review.md`, arbitrary new skills |
 
@@ -96,14 +115,15 @@ Reference implementation: `hermes_cli/auth.py`.
 
 ### Per-provider plan
 
+**Lean list.** v1 ships with exactly these providers. No Kimi / z.ai / MiniMax / DeepSeek / etc. in the first cut — the `openai-compat` entry already covers any OpenAI-API-compatible endpoint via `baseURL`, which handles 90% of future additions without new adapter code.
+
 | Provider | Primary | Secondary | Notes |
 |---|---|---|---|
 | Anthropic | `api_key` (`ANTHROPIC_API_KEY`) | `oauth_external` from Claude Code creds | Secondary shows billing warning (hard constraint #4) |
 | OpenAI | `api_key` (`OPENAI_API_KEY`) | `oauth_device_code` against `auth.openai.com` (genuine PKCE — see hermes `_codex_device_code_login`) | Device-code works on any host |
 | xAI | `api_key` (`XAI_API_KEY`) | — | Removed as the default — user picks |
 | Gemini | `api_key` (`GEMINI_API_KEY`) | `oauth_external` from gemini-cli creds | |
-| openai-compat | `api_key` + `baseURL` | — | Covers Ollama, LM Studio, OpenRouter, Together |
-| Nous Portal | `oauth_device_code` | `api_key` fallback | |
+| openai-compat | `api_key` + `baseURL` | — | Catches Ollama, LM Studio, OpenRouter, Together, and the long tail — no per-vendor adapter |
 
 ### Device-code flow reference (OpenAI)
 
@@ -355,19 +375,21 @@ Skills are a memory category. `skill` joins the existing categories (`convention
 |---|---|---|---|
 | **S0 — Spec + scaffolding** | Codex (team lead) | Read this spec. Scaffold `src/cockpit/core/` with the §4 event schema. Land empty package skeletons. Stub `SubagentHandle` + `Subagent` interfaces. Set up CI matrix. | — |
 | **S1 — Cockpit core + policy-gate preservation** | **Claude Code** | Implement `Transcript`, `EventBus`, `ChatController`, `ProviderRouter`. Prove any chat-driven X-engine action still compiles through `Candidate<Approved>`. Property tests enforcing hard constraint #1. | S0 |
-| **S2 — Auth adapters + provider registry** | Devin-1 | BYOK for anthropic/openai/xai/gemini. PKCE device-code for OpenAI + Nous Portal. `oauth_external` reader for `~/.claude/.credentials.json`. `~/.strand/auth.json` store with single-writer lock. Picker UI wiring. | S0 |
+| **S2 — Auth adapters + provider registry** | Devin-1 | BYOK for anthropic/openai/xai/gemini + `openai-compat`. PKCE device-code for OpenAI. `oauth_external` reader for `~/.claude/.credentials.json` + gemini-cli creds. `~/.strand/auth.json` store with single-writer lock. Picker UI wiring. | S0 |
 | **S3 — Web cockpit renderer** | Devin-2 | Vite + Hono app served by `strand dev`. SSE consumer rendering §4 schema. Chat UI + subagent tabs + slash commands + `/skills` review feed. Tailwind + shadcn/ui. | S1 partial (schema + stub events) |
 | **S4 — Subagent backends + seed skills** | Devin-3 | `cli-process` backend with `claude -p` + `codex exec` parsers. tmux wrapping for interactive. Seed skills: `claude-code`, `codex`, `pr-review` (port from hermes). Budget inheritance + caps. | S1 |
 | **S5 — Skill lifecycle + brainctl integration + Ink renderer** | Devin-4 | `data/skills.sqlite` schema. Usage metric hooks. Reflexion judge. Nightly scorer. Queue + review UI wiring. brainctl `skill` category registration. Ink renderer for the "classic"-preserving path. | S1, S4 seed skills |
 
-### Integration checkpoints (Codex enforces)
+### Integration checkpoints (Codex enforces, not time-boxed — flow-boxed)
 
-- **Day 1** — S0 landed, event schema frozen. All agents read this spec top-to-bottom, initials at the bottom of `docs/superpowers/specs/2026-04-24-strand-cockpit-design.md`.
-- **Day 3** — S1 + S2 render a streaming BYOK chat in Ink. If the Ink renderer can't render a streaming response from any provider by end of day 3, the event schema has a bug — fix before anything else ships.
-- **Day 5** — S3 web cockpit renders the same schema. Parity test: same events produce same transcript in both renderers.
-- **Day 7** — S4 first successful `/spawn claude` in web cockpit.
-- **Day 10** — S5 first queued skill proposal flows end-to-end; review UI works.
-- **Day 12** — Integration + cutover. Old TUI moves to `--classic`.
+Agents work fast. These are gate conditions, not days. Codex holds the green flag between each one.
+
+1. **Spec-read gate.** S0 landed, event schema frozen in code. All agents initial the sign-off at the bottom of this spec. Nobody writes feature code until this gate passes.
+2. **Alive gate.** S1 + S2 land a streaming BYOK chat in Ink. If any provider's streaming response doesn't render into the Ink transcript, the event schema has a bug — fix before anything else ships. This is the single highest-value checkpoint.
+3. **Parity gate.** S3 web cockpit renders the same schema. Parity test: identical event stream → identical transcript in Ink and Web. Divergence = P0.
+4. **Spawn gate.** S4 `/spawn claude` and `/spawn codex` both complete a oneshot task end-to-end with streamed output into the cockpit transcript. `--bare` default path verified. Budget inheritance verified (child can't exceed parent remaining).
+5. **Skill gate.** S5 scores a low-hit skill below threshold, emits a `queued_retire` proposal, operator approves in the review UI, skill drops out of the retrieval index. Same path for `queued_draft`.
+6. **Cutover gate.** Old TUI moves to `strand tui --classic`. Default `strand` enters chat cockpit. `strand.config.yaml` example updated (no default provider). Release branch opened.
 
 ### Kill switches
 
