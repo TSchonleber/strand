@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Strand — Operator Cockpit</title>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#0d1117;--surface:#161b22;--border:#30363d;
+      --fg:#e6edf3;--fg2:#8b949e;--accent:#58a6ff;
+      --green:#3fb950;--yellow:#d29922;--red:#f85149;--cyan:#39d2c0;
+      --font:ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,monospace;
+    }
+    html,body{height:100%;background:var(--bg);color:var(--fg);font:14px/1.5 var(--font)}
+    #app{display:flex;flex-direction:column;height:100vh;max-width:960px;margin:0 auto;padding:8px}
+
+    header{padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+    header h1{font-size:16px;color:var(--accent)}
+    header .protocol{font-size:11px;color:var(--fg2)}
+
+    /* ── Transcript ── */
+    #transcript{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:6px}
+    .msg{padding:6px 10px;border-radius:6px;max-width:80%;word-wrap:break-word}
+    .msg.user{align-self:flex-end;background:var(--accent);color:#000}
+    .msg.assistant{align-self:flex-start;background:var(--surface);border:1px solid var(--border)}
+    .msg.system{align-self:center;color:var(--fg2);font-size:12px;font-style:italic}
+    .msg.tool{align-self:flex-start;background:#1a1e24;border-left:3px solid var(--cyan);font-size:12px}
+    .msg .role{font-size:11px;color:var(--fg2);margin-bottom:2px}
+    .msg .streaming::after{content:"_";animation:blink .8s step-end infinite}
+    @keyframes blink{50%{opacity:0}}
+    .empty-state{color:var(--fg2);text-align:center;margin:auto;font-style:italic}
+
+    /* ── Subagent tabs ── */
+    #subagent-tabs{border-top:1px solid var(--border);padding:4px 12px;display:flex;gap:8px;font-size:12px;color:var(--fg2);min-height:28px}
+    #subagent-tabs .tab{padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid var(--border)}
+    #subagent-tabs .tab.active{border-color:var(--accent);color:var(--accent)}
+    #subagent-tabs:empty::after{content:"No subagents";font-style:italic}
+
+    /* ── Systems drawer ── */
+    #systems-drawer{border-top:1px solid var(--border)}
+    #systems-drawer summary{padding:6px 12px;cursor:pointer;color:var(--fg2);font-size:12px;user-select:none}
+    #systems-drawer .content{padding:8px 12px;font-size:12px;color:var(--fg2);max-height:160px;overflow-y:auto}
+    #systems-drawer .budget-warn{color:var(--yellow)}
+    #systems-drawer .error-entry{color:var(--red)}
+    #systems-drawer .policy-entry{color:var(--green)}
+
+    /* ── Skills feed ── */
+    #skills-feed{border-top:1px solid var(--border);padding:4px 12px;font-size:12px;color:var(--fg2);min-height:24px}
+    #skills-feed:empty::after{content:"No skill proposals";font-style:italic}
+    .skill-proposal{display:flex;gap:8px;align-items:center;padding:2px 0}
+    .skill-proposal .kind{font-weight:bold}
+    .skill-proposal .kind.draft{color:var(--cyan)}
+    .skill-proposal .kind.retire{color:var(--yellow)}
+    .skill-proposal .decision{font-size:11px}
+    .skill-proposal .decision.accepted{color:var(--green)}
+    .skill-proposal .decision.rejected{color:var(--red)}
+
+    /* ── Input ── */
+    #input-area{border-top:1px solid var(--border);padding:8px 12px;display:flex;gap:8px}
+    #input-area input{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--fg);font:inherit;outline:none}
+    #input-area input:focus{border-color:var(--accent)}
+    #input-area button{background:var(--accent);color:#000;border:none;border-radius:6px;padding:8px 16px;font:inherit;font-weight:600;cursor:pointer}
+    #input-area button:hover{opacity:.85}
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Strand</h1>
+      <span class="protocol">cockpit protocol v1</span>
+    </header>
+
+    <div id="transcript">
+      <div class="empty-state">Waiting for events&hellip;</div>
+    </div>
+
+    <div id="subagent-tabs"></div>
+
+    <details id="systems-drawer">
+      <summary>Systems (budget, errors, policy)</summary>
+      <div class="content">
+        <div id="budget-warnings"></div>
+        <div id="error-log"></div>
+        <div id="policy-log"></div>
+      </div>
+    </details>
+
+    <div id="skills-feed"></div>
+
+    <div id="input-area">
+      <input type="text" id="msg-input" placeholder="Type a message or /command..." autocomplete="off" />
+      <button id="send-btn">Send</button>
+    </div>
+  </div>
+
+  <script>
+    // Minimal inline client — will be replaced by Vite-bundled app.ts in production.
+    (function() {
+      const SESSION_ID = "default";
+      const transcript = document.getElementById("transcript");
+      const input = document.getElementById("msg-input");
+      const sendBtn = document.getElementById("send-btn");
+      const subagentTabs = document.getElementById("subagent-tabs");
+      const budgetWarnings = document.getElementById("budget-warnings");
+      const errorLog = document.getElementById("error-log");
+      const policyLog = document.getElementById("policy-log");
+      const skillsFeed = document.getElementById("skills-feed");
+
+      let token = "";
+      try {
+        const params = new URLSearchParams(window.location.search);
+        token = params.get("token") || "";
+      } catch(_) {}
+
+      // ── Render helpers ──
+      function clearEmpty() {
+        const empty = transcript.querySelector(".empty-state");
+        if (empty) empty.remove();
+      }
+
+      function appendMessage(role, content, streaming) {
+        clearEmpty();
+        const div = document.createElement("div");
+        div.className = "msg " + role;
+        div.innerHTML = '<div class="role">' + role + '</div><span class="' + (streaming ? "streaming" : "") + '">' + escapeHtml(content) + "</span>";
+        transcript.appendChild(div);
+        transcript.scrollTop = transcript.scrollHeight;
+        return div;
+      }
+
+      function escapeHtml(s) {
+        return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+      }
+
+      // Message ID → DOM element map for streaming deltas.
+      const msgElements = {};
+
+      function handleEvent(event) {
+        switch (event.t) {
+          case "transcript.append": {
+            const m = event.message;
+            const el = appendMessage(m.role, m.content, false);
+            el.dataset.messageId = m.id;
+            msgElements[m.id] = el;
+            break;
+          }
+          case "transcript.delta": {
+            const el = msgElements[event.messageId];
+            if (el) {
+              const span = el.querySelector("span");
+              span.className = "streaming";
+              span.textContent += event.chunk;
+              transcript.scrollTop = transcript.scrollHeight;
+            }
+            break;
+          }
+          case "subagent.spawn": {
+            const tab = document.createElement("div");
+            tab.className = "tab";
+            tab.dataset.subagentId = event.subagentId;
+            tab.textContent = event.backend + ":" + event.subagentId.slice(0, 8);
+            subagentTabs.appendChild(tab);
+            break;
+          }
+          case "subagent.end": {
+            const tab = subagentTabs.querySelector('[data-subagent-id="' + event.subagentId + '"]');
+            if (tab) tab.style.opacity = event.ok ? "0.5" : "1";
+            if (tab && !event.ok) tab.style.borderColor = "var(--red)";
+            break;
+          }
+          case "budget.warn": {
+            const pct = Math.round((event.used / event.cap) * 100);
+            const div = document.createElement("div");
+            div.className = "budget-warn";
+            div.textContent = "Budget " + event.dimension + ": " + pct + "% (" + event.used + "/" + event.cap + ")";
+            budgetWarnings.appendChild(div);
+            break;
+          }
+          case "error": {
+            const div = document.createElement("div");
+            div.className = "error-entry";
+            div.textContent = "[" + event.code + "] " + event.message;
+            errorLog.appendChild(div);
+            break;
+          }
+          case "policy.gate": {
+            const div = document.createElement("div");
+            div.className = "policy-entry";
+            div.textContent = event.candidateId + " → " + event.result + (event.reason ? " (" + event.reason + ")" : "");
+            policyLog.appendChild(div);
+            break;
+          }
+          case "skill.proposal": {
+            const div = document.createElement("div");
+            div.className = "skill-proposal";
+            div.dataset.proposalId = event.proposalId;
+            div.innerHTML = '<span class="kind ' + event.kind + '">' + event.kind + '</span> ' + escapeHtml(event.payload.rationale);
+            skillsFeed.appendChild(div);
+            break;
+          }
+          case "skill.decision": {
+            const el = skillsFeed.querySelector('[data-proposal-id="' + event.proposalId + '"]');
+            if (el) {
+              const span = document.createElement("span");
+              span.className = "decision " + event.decision;
+              span.textContent = " " + event.decision + " (" + event.by + ")";
+              el.appendChild(span);
+            }
+            break;
+          }
+        }
+      }
+
+      // ── SSE connection ──
+      async function connectSSE() {
+        try {
+          const resp = await fetch("/events", {
+            headers: { "X-Cockpit-Token": token, "Accept": "text/event-stream" }
+          });
+          if (!resp.ok) { console.error("SSE failed:", resp.status); return; }
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split("\n");
+            buf = lines.pop();
+            for (const line of lines) {
+              if (line.startsWith("data:")) {
+                const data = line.slice(5).trim();
+                if (!data) continue;
+                try { handleEvent(JSON.parse(data)); } catch(_) {}
+              }
+            }
+          }
+        } catch (err) {
+          console.error("SSE error:", err);
+          setTimeout(connectSSE, 3000);
+        }
+      }
+
+      // ── Input handling ──
+      async function send() {
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = "";
+
+        if (text.startsWith("/")) {
+          const parts = text.slice(1).split(/\s+/);
+          const cmd = parts[0];
+          const args = parts.slice(1);
+          await fetch("/commands/" + encodeURIComponent(cmd), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Cockpit-Token": token },
+            body: JSON.stringify({ sessionId: SESSION_ID, args: args })
+          });
+        } else {
+          appendMessage("user", text, false);
+          await fetch("/input", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Cockpit-Token": token },
+            body: JSON.stringify({ sessionId: SESSION_ID, text: text })
+          });
+        }
+      }
+
+      sendBtn.addEventListener("click", send);
+      input.addEventListener("keydown", function(e) { if (e.key === "Enter") send(); });
+
+      connectSSE();
+    })();
+  </script>
+</body>
+</html>
